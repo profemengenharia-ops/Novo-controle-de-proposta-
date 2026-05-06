@@ -155,7 +155,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       } else {
         await proposalService.createProposal({
           ...proposalToSave as Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'>,
-          createdBy: user?.uid || 'unknown'
+          createdBy: user?.id || ''
         });
       }
       toast.success(proposal.id ? 'Proposta atualizada com sucesso!' : 'Proposta criada com sucesso!');
