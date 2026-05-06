@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "Proposal": {
+      "title": "Proposal",
+      "description": "Commercial and technical engineering proposal",
+      "type": "object",
+      "properties": {
+        "clientName": { "type": "string" },
+        "proposalNumber": { "type": "string" },
+        "revision": { "type": "string" },
+        "status": { "type": "string", "enum": ["rascunho", "enviada", "em_negociacao", "ganha", "perdida", "expirada"] },
+        "validityDays": { "type": "integer" },
+        "technicalScope": { "type": "object" },
+        "commercialProposal": { "type": "object" },
+        "contractDetails": { "type": "object" },
+        "deadline": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" },
+        "scopeTitle": { "type": "string" },
+        "lossReason": { "type": "string" },
+        "interactions": { "type": "array" }
+      },
+      "required": ["clientName", "proposalNumber", "status", "createdBy"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory items and catalog products",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "brand": { "type": "string" },
+        "category": { "type": "string" },
+        "unit": { "type": "string" },
+        "stockLevel": { "type": "number" },
+        "price": { "type": "number" },
+        "costPrice": { "type": "number" }
+      },
+      "required": ["name", "category", "price"]
+    },
+    "Norm": {
+      "title": "Norm",
+      "description": "Technical standards and norms",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" }
+      },
+      "required": ["title", "content"]
+    }
+  },
+  "firestore": {
+    "/proposals/{proposalId}": {
+      "schema": "Proposal",
+      "description": "Engineering proposals"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Inventory item catalog"
+    },
+    "/norms/{normId}": {
+      "schema": "Norm",
+      "description": "Technical norms library"
+    }
+  }
+}
