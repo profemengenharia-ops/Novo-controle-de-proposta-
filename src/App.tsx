@@ -115,7 +115,7 @@ function AppContent() {
   };
 
   return (
-    <Layout activeTab={activeTab.includes('new-proposal') || activeTab.startsWith('edit-') ? 'proposals' : activeTab} setActiveTab={setActiveTab}>
+    <Layout activeTab={activeTab.includes('new-proposal') || activeTab === 'manual-proposal' || activeTab.startsWith('edit-') ? 'proposals' : activeTab} setActiveTab={setActiveTab}>
       {renderContent()}
       
       {showRadar && (

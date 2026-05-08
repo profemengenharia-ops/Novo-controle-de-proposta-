@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { X, Save, Upload, Calendar } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { STATUS_TAGS } from '../constants';
 
 interface ManualProposalModalProps {
   onClose: () => void;
@@ -136,7 +137,7 @@ export function ManualProposalModal({ onClose, onComplete }: ManualProposalModal
                   onChange={e => setFormData({...formData, status: e.target.value as any})}
                 >
                   {Object.entries(ProposalStatus).map(([key, val]) => (
-                    <option key={key} value={val}>{val.toUpperCase()}</option>
+                    <option key={key} value={val}>{STATUS_TAGS[val as ProposalStatus]?.label || val}</option>
                   ))}
                 </select>
               </div>

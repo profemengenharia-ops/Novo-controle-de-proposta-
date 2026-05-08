@@ -995,7 +995,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                <div className="flex items-center justify-between text-[var(--color-brand-primary)]">
                                  <span className="text-xs font-bold uppercase tracking-widest">Valor Final Sugerido</span>
                                  <span className="font-bold text-2xl tracking-tighter">
-                                   {formatCurrency(calculateTotal(proposal.commercialProposal?.items || []))}
+                                   {formatCurrency(proposal.commercialProposal?.totalValue || calculateTotal(proposal.commercialProposal?.items || []))}
                                  </span>
                                </div>
                             </div>

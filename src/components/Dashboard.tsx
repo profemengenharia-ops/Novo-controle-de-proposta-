@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { proposalService } from '../services/proposalService';
 import { Proposal, ProposalStatus } from '../types';
-import { 
-  TrendingUp, 
-  AlertTriangle, 
-  FileCheck, 
+import {
+  TrendingUp,
+  AlertTriangle,
+  FileCheck,
   Clock,
   ExternalLink,
   ArrowRight,
@@ -12,6 +12,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { formatCurrency, formatDate, cn } from '../lib/utils';
+import { STATUS_TAGS } from '../constants';
 import { ProposalStatusCard } from './ProposalStatusCard';
 
 
@@ -127,11 +128,9 @@ export function Dashboard({ setActiveTab, onShowRadar }: DashboardProps) {
                     <td className="px-6 py-4">
                       <span className={cn(
                         "text-[10px] font-bold uppercase tracking-tighter px-2 py-1 rounded",
-                        p.status === ProposalStatus.WON ? "bg-green-100 text-green-700" :
-                        p.status === ProposalStatus.SENT ? "bg-blue-100 text-blue-700" :
-                        "bg-gray-100 text-gray-700"
+                        STATUS_TAGS[p.status]?.color || "bg-gray-100 text-gray-700"
                       )}>
-                        {p.status}
+                        {STATUS_TAGS[p.status]?.label || p.status}
                       </span>
                     </td>
                   </tr>
@@ -188,7 +187,7 @@ export function Dashboard({ setActiveTab, onShowRadar }: DashboardProps) {
                       <div className="w-1 h-8 bg-orange-500 rounded-full" />
                       <div>
                         <p className="text-sm font-semibold">{p.clientName}</p>
-                        <p className="text-[10px] opacity-50 uppercase">{p.proposalNumber} • Vence em 12 dias</p>
+                        <p className="text-[10px] opacity-50 uppercase">{p.proposalNumber} • {(() => { const days = (p.validityDays || 30) - Math.floor((Date.now() - new Date(p.createdAt).getTime()) / 86400000); return days > 0 ? `Vence em ${days} dias` : 'EXPIRADA'; })()}</p>
                       </div>
                     </div>
                     <button className="opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-black/5 rounded-md">

@@ -423,7 +423,7 @@ export function PricingFormulation({ proposal, onChange, onApply }: PricingFormu
               </p>
               {realMargin < 15 && salePrice > 0 && (
                 <p className="mt-2 text-xs font-bold text-orange-600">
-                  💡 Sugestão: Ajustar preço em {((totalBaseCost * 1.15 - salePrice) / salePrice * 100).toFixed(1)}% para atingir 15% de margem.
+                  💡 Sugestão: Ajustar preço em {((totalBaseCost / 0.85 - salePrice) / salePrice * 100).toFixed(1)}% para atingir 15% de margem.
                 </p>
               )}
             </div>

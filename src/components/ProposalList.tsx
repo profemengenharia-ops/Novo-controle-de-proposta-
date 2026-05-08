@@ -280,10 +280,10 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             <button onClick={() => handleDuplicateWithRevision(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <History size={14} className="opacity-40" /> Gerar Nova Revisão
                             </button>
-                            <button onClick={() => window.open(`/proposal/${p.id}`, '_blank')} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/proposal/${p.id}`).then(() => toast.success('Link copiado!')); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <ExternalLink size={14} className="opacity-40" /> Copiar Link Público
                             </button>
-                            <button className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                            <button onClick={() => { window.open(`/proposal/${p.id}?print=1`, '_blank'); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Download size={14} className="opacity-40" /> Baixar PDF
                             </button>
                             <button onClick={() => { setInteractionId(p.id); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-[var(--color-brand-primary)]/10 text-[var(--color-brand-primary)] font-bold transition-colors">
@@ -386,7 +386,7 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                                         </div>
                                         <div>
                                           <p className="text-[8px] font-black uppercase text-neutral-400">Probabilidade</p>
-                                          <p className="text-sm font-bold">Alta (IA Calc)</p>
+                                          <p className="text-sm font-bold">{p.status === ProposalStatus.WON ? 'Ganha' : p.status === ProposalStatus.NEGOTIATING ? 'Média' : p.status === ProposalStatus.SENT ? 'Alta' : p.status === ProposalStatus.LOST ? 'Perdida' : 'Em aberto'}</p>
                                         </div>
                                       </div>
                                       <div className="p-4 border border-neutral-100 rounded-2xl flex items-center gap-3">
