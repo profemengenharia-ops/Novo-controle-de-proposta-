@@ -39,14 +39,12 @@ export function BudgetLineItemModal({ onClose, onAdd, editingItem }: Props) {
   const [loadingCatalog, setLoadingCatalog] = useState(false);
 
   useEffect(() => {
-    if (tab === 'catalogo' && catalogProducts.length === 0) {
-      setLoadingCatalog(true);
-      inventoryService.getAllProducts().then(data => {
-        setCatalogProducts(data);
-        setLoadingCatalog(false);
-      });
-    }
-  }, [tab]);
+    setLoadingCatalog(true);
+    inventoryService.getAllProducts().then(data => {
+      setCatalogProducts(data);
+      setLoadingCatalog(false);
+    });
+  }, []);
 
   const filteredCatalog = catalogProducts.filter(p =>
     p.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
@@ -247,10 +245,10 @@ export function BudgetLineItemModal({ onClose, onAdd, editingItem }: Props) {
             {/* Notas */}
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest opacity-40">Obs. / Especificação</label>
-              <input
-                type="text"
-                placeholder="Opcional"
-                className="w-full p-3 bg-black/5 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-black"
+              <textarea
+                rows={2}
+                placeholder="Normas, marca, especificação técnica..."
+                className="w-full p-3 bg-black/5 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-black resize-none"
                 value={form.notes}
                 onChange={e => setForm({ ...form, notes: e.target.value })}
               />

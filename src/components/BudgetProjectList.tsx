@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, FileText, MapPin, User, Trash2, ChevronRight, X, FolderOpen } from 'lucide-react';
+import { Plus, Search, FileText, MapPin, User, Trash2, ChevronRight, X, FolderOpen, ArrowUpDown } from 'lucide-react';
 import { BudgetProject, BudgetStatus } from '../types';
 import { budgetProjectService } from '../services/budgetProjectService';
 import { useAuth } from '../hooks/useAuth';
@@ -49,6 +49,8 @@ export function BudgetProjectList({ onOpen }: Props) {
   const [projects, setProjects] = useState<BudgetProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<BudgetStatus | null>(null);
+  const [sortBy, setSortBy] = useState<'updated' | 'price_desc' | 'price_asc' | 'name'>('updated');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<NewProjectForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -62,10 +64,15 @@ export function BudgetProjectList({ onOpen }: Props) {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = projects.filter(p =>
-    p.title.toLowerCase().includes(search.toLowerCase()) ||
-    p.clientName.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = projects
+    .filter(p => !statusFilter || p.status === statusFilter)
+    .filter(p => !search || p.title.toLowerCase().includes(search.toLowerCase()) || p.clientName.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === 'price_desc') return b.finalPrice - a.finalPrice;
+      if (sortBy === 'price_asc') return a.finalPrice - b.finalPrice;
+      if (sortBy === 'name') return a.title.localeCompare(b.title);
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,20 +117,35 @@ export function BudgetProjectList({ onOpen }: Props) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="relative max-w-md w-full">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-500/40" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por obra ou cliente..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-12 pr-10 py-4 bg-white border border-black/5 rounded-2xl text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all placeholder:text-black/20 font-medium"
-          />
-          {search && (
-            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-orange-50 rounded-lg text-orange-400 transition-all">
-              <X size={16} />
-            </button>
-          )}
+        <div className="flex gap-3 flex-1 max-w-2xl w-full">
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-500/40" size={18} />
+            <input
+              type="text"
+              placeholder="Buscar por obra ou cliente..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-12 pr-10 py-4 bg-white border border-black/5 rounded-2xl text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all placeholder:text-black/20 font-medium"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-orange-50 rounded-lg text-orange-400 transition-all">
+                <X size={16} />
+              </button>
+            )}
+          </div>
+          <div className="relative">
+            <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30" size={15} />
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as typeof sortBy)}
+              className="pl-9 pr-4 py-4 bg-white border border-black/5 rounded-2xl text-xs font-bold shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500/20 appearance-none cursor-pointer"
+            >
+              <option value="updated">Mais recentes</option>
+              <option value="price_desc">Maior valor</option>
+              <option value="price_asc">Menor valor</option>
+              <option value="name">Nome A–Z</option>
+            </select>
+          </div>
         </div>
         <button
           onClick={() => setShowModal(true)}
@@ -145,15 +167,31 @@ export function BudgetProjectList({ onOpen }: Props) {
         </button>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — click to filter */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[BudgetStatus.DRAFT, BudgetStatus.APPROVED, BudgetStatus.EXECUTING, BudgetStatus.COMPLETED].map(s => (
-          <div key={s} className="bg-white rounded-2xl border border-black/5 shadow-sm p-5">
+          <button
+            key={s}
+            onClick={() => setStatusFilter(f => f === s ? null : s)}
+            className={cn(
+              'bg-white rounded-2xl border shadow-sm p-5 text-left transition-all hover:shadow-md',
+              statusFilter === s
+                ? 'border-orange-400 ring-1 ring-orange-400 bg-orange-50'
+                : 'border-black/5 hover:border-orange-200'
+            )}
+          >
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">{STATUS_LABEL[s]}</p>
             <p className="text-3xl font-black mt-1">{projects.filter(p => p.status === s).length}</p>
-          </div>
+          </button>
         ))}
       </div>
+      {statusFilter && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold opacity-40">Filtrando por:</span>
+          <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full">{STATUS_LABEL[statusFilter]}</span>
+          <button onClick={() => setStatusFilter(null)} className="text-xs font-bold text-orange-500 hover:underline">Limpar</button>
+        </div>
+      )}
 
       {/* List */}
       {loading ? (

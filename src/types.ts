@@ -84,7 +84,7 @@ export interface CommercialProposal {
   reajuste: string;
   guarantee: string;
   items: CommercialItem[];
-  pricingMode: 'manual' | 'catalog' | 'spreadsheet' | 'erp';
+  pricingMode?: string;
 }
 
 export interface ContractDetails {

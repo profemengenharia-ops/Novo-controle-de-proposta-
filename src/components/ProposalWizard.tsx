@@ -15,18 +15,13 @@ import {
   Save,
   AlertCircle,
   FileSpreadsheet,
-  PackageSearch,
-  Zap,
   Calculator,
-  TrendingUp,
   Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import * as XLSX from 'xlsx';
-import { PriceFormationModal } from './PriceFormationModal';
-import { PricingFormulation } from './PricingFormulation';
-import { CommercialItem, PriceFormation, GlobalPriceFormation } from '../types';
+import { CommercialItem } from '../types';
 
 import { ProposalPrintView } from './ProposalPrintView';
 import { BudgetSelector } from './BudgetSelector';
@@ -49,7 +44,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [aiPrompt, setAiPrompt] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [revisionNote, setRevisionNote] = useState('');
-  const [selectedItemForPricing, setSelectedItemForPricing] = useState<{index: number, item: CommercialItem} | null>(null);
   const [showBudgetSelector, setShowBudgetSelector] = useState(false);
   const [libraryNorms, setLibraryNorms] = useState<Norm[]>([]);
   const [libraryBlocks, setLibraryBlocks] = useState<Block[]>([]);
@@ -810,33 +804,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                        exit={{ opacity: 0, x: -20 }}
                        className="space-y-8 flex-1"
                     >
-                      <div className="grid grid-cols-5 gap-4">
-                        {[
-                          { id: 'manual', label: 'Manual', icon: Calculator, desc: 'Venda Rápida' },
-                          { id: 'engineering', label: 'Engenharia', icon: TrendingUp, desc: 'BDI Técnico' },
-                          { id: 'catalog', label: 'Catálogo', icon: PackageSearch, desc: 'Itens Internos' },
-                          { id: 'spreadsheet', label: 'Planilha', icon: FileSpreadsheet, desc: 'Importar Excel' },
-                          { id: 'erp', label: 'ERP', icon: Zap, desc: 'Sincronizar' },
-                        ].map((mode) => (
-                          <button 
-                            key={mode.id}
-                            onClick={() => updateCommercial('pricingMode', mode.id)}
-                            className={cn(
-                              "p-4 rounded-xl border flex flex-col items-center gap-2 transition-all",
-                              proposal.commercialProposal?.pricingMode === mode.id 
-                                ? "bg-[var(--color-brand-primary)] text-white border-[var(--color-brand-primary)]" 
-                                : "bg-white border-black/5 hover:border-black/10"
-                            )}
-                          >
-                            <mode.icon size={20} />
-                            <div className="text-center">
-                              <p className="text-[10px] font-bold uppercase tracking-widest">{mode.label}</p>
-                              <p className="text-[8px] opacity-60 uppercase">{mode.desc}</p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-
                       <div className="space-y-6">
                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-black/5 p-4 rounded-2xl">
                             <div className="space-y-1">
@@ -872,7 +839,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                   <th className="px-4 py-3 w-20 text-center">Quant.</th>
                                   <th className="px-4 py-3 w-24 text-right">Unitário</th>
                                   <th className="px-4 py-3 w-32 text-right">Total</th>
-                                  <th className="px-4 py-3 w-20 text-center">Ações</th>
                                   <th className="px-4 py-3 w-10"></th>
                                 </tr>
                               </thead>
@@ -935,18 +901,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                     <td className="px-4 py-2 text-right font-bold text-sm font-mono">
                                       {formatCurrency(item.totalPrice)}
                                     </td>
-                                    <td className="px-4 py-2 text-center">
-                                      <button 
-                                        onClick={() => setSelectedItemForPricing({ index: i, item })}
-                                        className={cn(
-                                          "p-1.5 rounded-lg transition-all",
-                                          item.source === 'engineering' ? "bg-orange-100 text-orange-600" : "bg-neutral-100 text-neutral-400 hover:text-neutral-900"
-                                        )}
-                                        title="Formação de Preço (BDI)"
-                                      >
-                                        <Calculator size={14} />
-                                      </button>
-                                    </td>
                                     <td className="px-2 py-2 text-right">
                                       <button onClick={() => updateCommercial('items', proposal.commercialProposal!.items.filter((_, idx) => idx !== i))}>
                                         <Trash2 size={14} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -993,18 +947,16 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                  <span className="font-mono text-sm">{formatCurrency(calculateTotal(proposal.commercialProposal?.items || []))}</span>
                                </div>
                                <div className="flex items-center justify-between text-[var(--color-brand-primary)]">
-                                 <span className="text-xs font-bold uppercase tracking-widest">Valor Final Sugerido</span>
+                                 <span className="text-xs font-bold uppercase tracking-widest">Valor Total</span>
                                  <span className="font-bold text-2xl tracking-tighter">
-                                   {formatCurrency(proposal.commercialProposal?.totalValue || calculateTotal(proposal.commercialProposal?.items || []))}
+                                   {formatCurrency(calculateTotal(proposal.commercialProposal?.items || []))}
                                  </span>
                                </div>
                             </div>
                             <div className="p-4 bg-orange-50 rounded-xl flex gap-3">
                               <AlertCircle size={20} className="text-orange-500 shrink-0" />
                               <p className="text-xs text-orange-700 italic">
-                                {proposal.commercialProposal?.pricingMode === 'erp' ? 
-                                  "Modo ERP Ativo: Preços sincronizados em tempo real." : 
-                                  "Use o modo Catálogo para maior precisão."}
+                                Use "Buscar Orçamento" para importar itens com BDI aplicado do módulo de Orçamentos.
                               </p>
                             </div>
                          </div>
@@ -1031,24 +983,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                           </div>
                        </div>
 
-                       <div className="pt-8 mt-8 border-t border-black/10 space-y-2">
-                         <div className="flex items-center gap-2 text-[var(--color-brand-primary)]">
-                           <Calculator size={16} />
-                           <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Composição de Preço (BDI)</span>
-                         </div>
-                         <p className="text-xs opacity-50 italic">
-                           Opcional. Use para detalhar custos diretos, indiretos e BDI.
-                           O valor calculado pode ser aplicado ao total da proposta clicando em "Aplicar à Proposta".
-                         </p>
-                       </div>
-
-                       <PricingFormulation
-                         proposal={proposal}
-                         onChange={(pricing) => setProposal(prev => ({ ...prev, pricing }))}
-                         onApply={(total) => {
-                           updateCommercial('totalValue', total);
-                         }}
-                       />
                     </motion.div>
                   )}
 
@@ -1146,31 +1080,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
         )}
       </div>
 
-      <AnimatePresence>
-        {selectedItemForPricing && (
-          <PriceFormationModal 
-            itemDescription={selectedItemForPricing.item.description || "Novo Item"}
-            initialData={selectedItemForPricing.item.priceFormation}
-            onClose={() => setSelectedItemForPricing(null)}
-            onSave={(pricing) => {
-              const next = proposal.commercialProposal!.items.map((it, idx) => {
-                if (idx === selectedItemForPricing.index) {
-                  return { 
-                    ...it, 
-                    unitPrice: pricing.finalPrice, 
-                    totalPrice: (it.quantity || 1) * pricing.finalPrice,
-                    source: 'engineering' as const,
-                    priceFormation: pricing
-                  };
-                }
-                return it;
-              });
-              updateCommercial('items', next);
-              setSelectedItemForPricing(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
       {showBudgetSelector && (
         <BudgetSelector 
           onSelect={handleBudgetSelect} 

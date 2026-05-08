@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, Save, Check,
   Package, HardHat, Wrench, Truck, Edit2, GripVertical,
-  AlertCircle, TrendingUp, Settings2, ChevronUp,
+  AlertCircle, TrendingUp, Settings2, ChevronUp, Copy, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
@@ -54,6 +54,14 @@ const TYPE_LABEL: Record<BudgetLineType, string> = {
   servico:     'Serviço',
   equipamento: 'Equipamento',
 };
+
+// ─── BDI Presets ─────────────────────────────────────────────────────────────
+
+const BDI_PRESETS: { label: string; bdi: Omit<BudgetBDI, 'calculatedBDI'> }[] = [
+  { label: 'Obra Pública', bdi: { centralAdmin: 4, financialExpenses: 1.2, insuranceAndGuarantees: 0.8, risks: 1, profit: 7.5, taxes: 8.65 } },
+  { label: 'Serviços Privados', bdi: { centralAdmin: 3, financialExpenses: 1.0, insuranceAndGuarantees: 0.5, risks: 0.5, profit: 10, taxes: 6.5 } },
+  { label: 'Conservador', bdi: { centralAdmin: 5, financialExpenses: 1.5, insuranceAndGuarantees: 1.0, risks: 2.0, profit: 12, taxes: 8.65 } },
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -112,6 +120,11 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
   const totalBDI = useMemo(() => totalDirectCost * (calculatedBDIPct / 100), [totalDirectCost, calculatedBDIPct]);
   const finalPrice = useMemo(() => totalDirectCost + totalIndirectCost + totalBDI, [totalDirectCost, totalIndirectCost, totalBDI]);
 
+  const marginPct = useMemo(
+    () => (finalPrice > 0 ? (totalBDI / finalPrice) * 100 : 0),
+    [totalBDI, finalPrice]
+  );
+
   const byType = useMemo(() => {
     const totals: Record<BudgetLineType, number> = { material: 0, mao_de_obra: 0, servico: 0, equipamento: 0 };
     project.stages.forEach(st => st.items.forEach(i => { totals[i.type] += i.totalCost; }));
@@ -164,6 +177,30 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
     update({ stages: project.stages.filter(s => s.id !== id) });
   };
 
+  const duplicateStage = (stageId: string) => {
+    const src = project.stages.find(s => s.id === stageId);
+    if (!src) return;
+    const clone: BudgetStage = {
+      id: newId(),
+      name: src.name + ' (Cópia)',
+      order: project.stages.length + 1,
+      items: src.items.map(i => ({ ...i, id: newId() })),
+    };
+    setExpandedStages(prev => new Set([...prev, clone.id]));
+    update({ stages: [...project.stages, clone] });
+    toast.success('Etapa duplicada!');
+  };
+
+  const moveStage = (id: string, direction: 'up' | 'down') => {
+    const idx = project.stages.findIndex(s => s.id === id);
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === project.stages.length - 1) return;
+    const stages = [...project.stages];
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    [stages[idx], stages[swapIdx]] = [stages[swapIdx], stages[idx]];
+    update({ stages: stages.map((s, i) => ({ ...s, order: i + 1 })) });
+  };
+
   const addItemToStage = (stageId: string, item: Omit<BudgetLineItem, 'id'>) => {
     update({
       stages: project.stages.map(s =>
@@ -189,6 +226,11 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
           : s
       ),
     });
+  };
+
+  const duplicateItem = (stageId: string, item: BudgetLineItem) => {
+    const { id: _id, ...rest } = item;
+    addItemToStage(stageId, rest);
   };
 
   const deleteItem = (stageId: string, itemId: string) => {
@@ -323,6 +365,29 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
+                    onClick={() => moveStage(stage.id, 'up')}
+                    className="p-1.5 hover:bg-black/5 rounded-lg text-black/30 hover:text-black transition-colors disabled:opacity-20"
+                    title="Mover para cima"
+                    disabled={project.stages.indexOf(stage) === 0}
+                  >
+                    <ArrowUp size={13} />
+                  </button>
+                  <button
+                    onClick={() => moveStage(stage.id, 'down')}
+                    className="p-1.5 hover:bg-black/5 rounded-lg text-black/30 hover:text-black transition-colors disabled:opacity-20"
+                    title="Mover para baixo"
+                    disabled={project.stages.indexOf(stage) === project.stages.length - 1}
+                  >
+                    <ArrowDown size={13} />
+                  </button>
+                  <button
+                    onClick={() => duplicateStage(stage.id)}
+                    className="p-1.5 hover:bg-blue-50 rounded-lg text-blue-400 hover:text-blue-600 transition-colors"
+                    title="Duplicar etapa"
+                  >
+                    <Copy size={13} />
+                  </button>
+                  <button
                     onClick={() => { setEditingStageId(stage.id); setEditingStageName(stage.name); }}
                     className="p-1.5 hover:bg-black/5 rounded-lg text-black/40 hover:text-black transition-colors"
                     title="Renomear"
@@ -381,6 +446,7 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
                                 onUpdate={patch => updateItem(stage.id, item.id, patch)}
                                 onDelete={() => deleteItem(stage.id, item.id)}
                                 onEdit={() => setAddItemModal({ stageId: stage.id, item })}
+                                onDuplicate={() => duplicateItem(stage.id, item)}
                               />
                             ))}
                           </tbody>
@@ -474,6 +540,57 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
               <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Preço Final</span>
               <span className="font-mono text-xl font-black text-white">{formatCurrency(finalPrice)}</span>
             </div>
+
+            {/* Margin health */}
+            {finalPrice > 0 && (
+              <div className={cn(
+                'rounded-2xl p-4 flex items-center justify-between',
+                marginPct >= 15 ? 'bg-green-50' : marginPct >= 8 ? 'bg-orange-50' : 'bg-red-50'
+              )}>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-50">Margem BDI</p>
+                  <p className={cn(
+                    'text-2xl font-black',
+                    marginPct >= 15 ? 'text-green-700' : marginPct >= 8 ? 'text-orange-600' : 'text-red-600'
+                  )}>
+                    {marginPct.toFixed(1)}%
+                  </p>
+                </div>
+                <span className={cn(
+                  'text-[10px] font-bold px-2 py-1 rounded-lg',
+                  marginPct >= 15 ? 'bg-green-100 text-green-700' : marginPct >= 8 ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-600'
+                )}>
+                  {marginPct >= 15 ? 'Saudável' : marginPct >= 8 ? 'Atenção' : 'Crítico'}
+                </span>
+              </div>
+            )}
+
+            {/* Breakdown % */}
+            {totalDirectCost > 0 && (
+              <div className="space-y-1.5">
+                {(Object.keys(byType) as BudgetLineType[]).map(type =>
+                  byType[type] > 0 ? (
+                    <div key={type} className="space-y-1">
+                      <div className="flex justify-between text-[10px] font-bold opacity-50">
+                        <span>{TYPE_LABEL[type]}</span>
+                        <span>{((byType[type] / totalDirectCost) * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="h-1 bg-black/5 rounded-full overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full', {
+                            'bg-blue-400': type === 'material',
+                            'bg-orange-400': type === 'mao_de_obra',
+                            'bg-purple-400': type === 'servico',
+                            'bg-green-400': type === 'equipamento',
+                          })}
+                          style={{ width: `${(byType[type] / totalDirectCost) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : null
+                )}
+              </div>
+            )}
           </div>
 
           {/* Custos Indiretos */}
@@ -537,6 +654,17 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
                   className="overflow-hidden border-t border-black/5"
                 >
                   <div className="p-5 space-y-3">
+                    <div className="flex flex-wrap gap-2 pb-1">
+                      {BDI_PRESETS.map(p => (
+                        <button
+                          key={p.label}
+                          onClick={() => update({ bdi: { ...project.bdi, ...p.bdi } })}
+                          className="px-3 py-1.5 bg-orange-50 text-orange-700 text-[10px] font-bold rounded-lg hover:bg-orange-100 transition-all"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                     {BDI_FIELDS.map(f => (
                       <BDIRow
                         key={f.key}
@@ -603,9 +731,10 @@ interface ItemRowProps {
   onUpdate: (patch: Partial<BudgetLineItem>) => void;
   onDelete: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
 }
 
-function ItemRow({ item, onUpdate, onDelete, onEdit }: ItemRowProps) {
+function ItemRow({ item, onUpdate, onDelete, onEdit, onDuplicate }: ItemRowProps) {
   const [editQty, setEditQty] = useState(false);
   const [editCost, setEditCost] = useState(false);
 
@@ -668,8 +797,9 @@ function ItemRow({ item, onUpdate, onDelete, onEdit }: ItemRowProps) {
 
       <td className="px-3 py-3">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={onEdit} className="p-1 hover:bg-black/5 rounded text-black/30 hover:text-black transition-colors"><Edit2 size={11} /></button>
-          <button onClick={onDelete} className="p-1 hover:bg-red-50 rounded text-red-300 hover:text-red-600 transition-colors"><Trash2 size={11} /></button>
+          <button onClick={onDuplicate} className="p-1 hover:bg-blue-50 rounded text-blue-300 hover:text-blue-600 transition-colors" title="Duplicar"><Copy size={11} /></button>
+          <button onClick={onEdit} className="p-1 hover:bg-black/5 rounded text-black/30 hover:text-black transition-colors" title="Editar"><Edit2 size={11} /></button>
+          <button onClick={onDelete} className="p-1 hover:bg-red-50 rounded text-red-300 hover:text-red-600 transition-colors" title="Excluir"><Trash2 size={11} /></button>
         </div>
       </td>
     </tr>

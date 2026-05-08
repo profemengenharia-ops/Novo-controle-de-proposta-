@@ -2,6 +2,19 @@ import { supabase, isMockMode } from '../lib/supabase';
 import { BudgetProject, BudgetStatus, BudgetIndirectCosts, BudgetBDI } from '../types';
 
 const TABLE = 'budget_projects';
+const STORAGE_KEY = 'budget_projects_mock';
+
+function loadMockStore(): BudgetProject[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as BudgetProject[];
+  } catch {}
+  return MOCK_PROJECTS.map(p => ({ ...p }));
+}
+
+function persistMock(store: BudgetProject[]) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch {}
+}
 
 const defaultIndirectCosts = (): BudgetIndirectCosts => ({
   administration: 0,
@@ -104,7 +117,7 @@ const MOCK_PROJECTS: BudgetProject[] = [
   },
 ];
 
-const MOCK_STORE = [...MOCK_PROJECTS];
+const MOCK_STORE: BudgetProject[] = loadMockStore();
 
 export const budgetProjectService = {
   async getAll(): Promise<BudgetProject[]> {
@@ -148,6 +161,7 @@ export const budgetProjectService = {
         createdBy: userId,
       };
       MOCK_STORE.push(newProject);
+      persistMock(MOCK_STORE);
       return id;
     }
 
@@ -172,11 +186,12 @@ export const budgetProjectService = {
     if (isMockMode) {
       const idx = MOCK_STORE.findIndex(p => p.id === id);
       if (idx !== -1) {
-        MOCK_STORE[idx] = { 
-          ...MOCK_STORE[idx], 
-          ...updates, 
-          updatedAt: new Date().toISOString() 
+        MOCK_STORE[idx] = {
+          ...MOCK_STORE[idx],
+          ...updates,
+          updatedAt: new Date().toISOString()
         };
+        persistMock(MOCK_STORE);
       }
       return;
     }
@@ -187,7 +202,7 @@ export const budgetProjectService = {
   async delete(id: string): Promise<void> {
     if (isMockMode) {
       const idx = MOCK_STORE.findIndex(p => p.id === id);
-      if (idx !== -1) MOCK_STORE.splice(idx, 1);
+      if (idx !== -1) { MOCK_STORE.splice(idx, 1); persistMock(MOCK_STORE); }
       return;
     }
     const { error } = await supabase.from(TABLE).delete().eq('id', id);
