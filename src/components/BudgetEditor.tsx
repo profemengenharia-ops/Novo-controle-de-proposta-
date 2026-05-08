@@ -12,8 +12,9 @@ import {
 } from '../types';
 import { budgetProjectService } from '../services/budgetProjectService';
 import { formatCurrency, cn, calculateBDI } from '../lib/utils';
-import { AddBudgetItemModal } from './AddBudgetItemModal';
+import { BudgetLineItemModal } from './BudgetLineItemModal';
 import { BudgetPrintView } from './BudgetPrintView';
+import { confirmAction } from '../hooks/useConfirm';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -153,8 +154,13 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
     setEditingStageId(null);
   };
 
-  const deleteStage = (id: string) => {
-    if (!confirm('Excluir esta etapa e todos os seus itens?')) return;
+  const deleteStage = async (id: string) => {
+    const ok = await confirmAction({
+      title: 'Excluir esta etapa?',
+      description: 'Todos os itens dessa etapa serão removidos.',
+      confirmLabel: 'Excluir',
+    });
+    if (!ok) return;
     update({ stages: project.stages.filter(s => s.id !== id) });
   };
 
@@ -573,7 +579,7 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
       {/* Add item modal */}
       <AnimatePresence>
         {addItemModal && (
-          <AddBudgetItemModal
+          <BudgetLineItemModal
             editingItem={addItemModal.item}
             onClose={() => setAddItemModal(null)}
             onAdd={item => {

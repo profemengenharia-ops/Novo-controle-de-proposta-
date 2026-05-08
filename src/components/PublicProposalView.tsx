@@ -2,17 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { Proposal, ProposalStatus } from '../types';
 import { proposalService } from '../services/proposalService';
 import { formatDate, formatCurrency, cn } from '../lib/utils';
-import { 
-  CheckCircle2, 
-  Clock, 
-  FileText, 
-  ShieldCheck, 
+import {
+  CheckCircle2,
+  Clock,
+  FileText,
+  ShieldCheck,
   Calendar,
   Download,
-  AlertCircle
+  AlertCircle,
+  X
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { STATUS_TAGS } from '../constants';
+import { toast } from 'sonner';
 
 interface PublicViewProps {
   id: string;
@@ -23,6 +25,9 @@ export function PublicProposalView({ id }: PublicViewProps) {
   const [loading, setLoading] = useState(true);
   const [approvedTech, setApprovedTech] = useState(false);
   const [approvedComm, setApprovedComm] = useState(false);
+  const [showApproval, setShowApproval] = useState(false);
+  const [signature, setSignature] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -51,25 +56,28 @@ export function PublicProposalView({ id }: PublicViewProps) {
     );
   }
 
-  const handleFinalApproval = async () => {
+  const handleFinalApproval = () => {
     if (!approvedTech || !approvedComm) return;
-    
-    const clientSignature = prompt('Para finalizar a aprovação, digite seu nome completo como assinatura:');
-    if (!clientSignature || clientSignature.length < 5) {
-      alert('A assinatura é obrigatória para aprovação (mínimo 5 caracteres).');
+    setShowApproval(true);
+  };
+
+  const submitApproval = async () => {
+    if (signature.trim().length < 5) {
+      toast.error('Informe seu nome completo (mínimo 5 caracteres).');
       return;
     }
-
-    if (!confirm(`Confirma a aprovação da proposta ${proposal.proposalNumber} por ${clientSignature}?`)) {
-      return;
+    setSubmitting(true);
+    try {
+      await proposalService.updateProposal(id, { status: ProposalStatus.WON });
+      setProposal(prev => prev ? { ...prev, status: ProposalStatus.WON } : null);
+      toast.success('Proposta aprovada com sucesso!');
+      setShowApproval(false);
+      setSignature('');
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao registrar aprovação.');
     }
-
-    await proposalService.updateProposal(id, { 
-      status: ProposalStatus.WON,
-    });
-    
-    setProposal(prev => prev ? { ...prev, status: ProposalStatus.WON } : null);
-    alert('Proposta aprovada com sucesso!');
+    setSubmitting(false);
   };
 
   return (
@@ -261,6 +269,57 @@ export function PublicProposalView({ id }: PublicViewProps) {
            </p>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showApproval && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 bg-black text-white flex justify-between items-center">
+                <h3 className="font-bold text-lg">Aprovação Formal</h3>
+                <button onClick={() => setShowApproval(false)} className="hover:bg-white/20 p-2 rounded-full"><X size={18} /></button>
+              </div>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-neutral-600">
+                  Você está aprovando a proposta <span className="font-bold">{proposal.proposalNumber}</span>.
+                  Esta ação é equivalente a uma assinatura.
+                </p>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest opacity-60">Nome Completo (assinatura)</label>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={signature}
+                    onChange={e => setSignature(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') submitApproval(); }}
+                    className="w-full p-4 bg-black/5 rounded-2xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Ex: João da Silva"
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowApproval(false)}
+                    className="flex-1 py-3 text-xs font-bold uppercase tracking-widest opacity-60 hover:opacity-100"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={submitApproval}
+                    disabled={submitting || signature.trim().length < 5}
+                    className="flex-[2] py-3 bg-orange-500 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-orange-600 disabled:opacity-40"
+                  >
+                    {submitting ? 'Enviando...' : 'Confirmar Aprovação'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

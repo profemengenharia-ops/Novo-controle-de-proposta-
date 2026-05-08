@@ -17,13 +17,14 @@ import {
 } from 'lucide-react';
 import { Product, BudgetProject } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
-import { usePricingEngine, PricingSettings, PricingItem } from '../hooks/usePricingEngine';
 import { inventoryService } from '../services/inventoryService';
 import { supplierService } from '../services/supplierService';
-import { BudgetItemModal } from './BudgetItemModal';
+import { CatalogProductModal } from './CatalogProductModal';
 import { BudgetProjectList } from './BudgetProjectList';
 import { BudgetEditor } from './BudgetEditor';
 import { LaborRateManager } from './LaborRateManager';
+import { confirmAction } from '../hooks/useConfirm';
+import { toast } from 'sonner';
 
 type Tab = 'orcamentos' | 'catalogo' | 'mao_de_obra';
 
@@ -93,20 +94,6 @@ function CatalogoInsumos() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const pricingSettings: PricingSettings = {
-    taxRate: 0.15,
-    adminOverhead: 0.10,
-    desiredMargin: 0.20,
-    indirectCosts: 1500,
-  };
-
-  const pricingItems: PricingItem[] = products.map(p => ({
-    unitCost: p.costPrice ?? 0,
-    quantity: p.stockLevel,
-  }));
-
-  const pricingResult = usePricingEngine(pricingItems, pricingSettings);
-
   const categories = useMemo(() => {
     const cats = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
     return ['all', ...cats];
@@ -122,20 +109,31 @@ function CatalogoInsumos() {
   useEffect(() => { loadProducts(); }, []);
 
   const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este insumo/serviço do catálogo?')) {
+    const ok = await confirmAction({
+      title: 'Excluir item do catálogo?',
+      description: 'Esta ação não pode ser desfeita.',
+      confirmLabel: 'Excluir',
+    });
+    if (!ok) return;
+    try {
       await inventoryService.deleteProduct(id);
+      toast.success('Item excluído.');
       loadProducts();
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao excluir item.');
     }
   };
 
-  const handleSyncWithSupplier = async () => {
-    const baseUrl = prompt('Digite a URL base da API do fornecedor:', 'https://api.supplier.com/v1');
-    const apiKey = prompt('Digite a chave da API:');
-    if (!baseUrl || !apiKey) { alert('Configuração de fornecedor incompleta.'); return; }
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [supplierBaseUrl, setSupplierBaseUrl] = useState('https://api.supplier.com/v1');
+  const [supplierApiKey, setSupplierApiKey] = useState('');
+
+  const runSupplierSync = async (baseUrl: string, apiKey: string) => {
     setIsSyncing(true);
     try {
       const supplierData = await supplierService.fetchSupplierStock({ baseUrl, apiKey, supplierName: 'Fornecedor Integrado' });
-      alert(`${supplierData.length} insumos encontrados. Sincronizando...`);
+      toast.info(`${supplierData.length} insumos encontrados. Sincronizando...`);
       const updatesList: {id: string, updates: Partial<Product>}[] = [];
       for (const item of supplierData) {
         const local = products.find(p => p.name.toLowerCase() === item.name?.toLowerCase());
@@ -154,13 +152,17 @@ function CatalogoInsumos() {
         await inventoryService.updateProductsBatch(updatesList);
       }
       await loadProducts();
-      alert('Sincronização concluída!');
+      toast.success('Sincronização concluída!');
     } catch (error) {
       console.error(error);
-      alert('Erro ao sincronizar com fornecedor.');
+      toast.error('Erro ao sincronizar com fornecedor.');
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const handleSyncWithSupplier = () => {
+    setShowSupplierModal(true);
   };
 
   const filteredProducts = products.filter(p => {
@@ -305,9 +307,11 @@ function CatalogoInsumos() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="p-8 bg-blue-50 rounded-3xl border border-blue-100 flex items-center justify-between shadow-sm">
           <div className="space-y-1">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Preço Sugerido (BDI)</p>
-            <h4 className="text-3xl font-bold text-blue-900 tracking-tight">{pricingResult ? formatCurrency(pricingResult.suggestedPrice) : '-'}</h4>
-            <p className="text-xs opacity-60">Margem Real: {pricingResult ? pricingResult.realMarginPercent + '%' : '-'} | Status: {pricingResult ? pricingResult.status : '-'}</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Valor Total do Estoque</p>
+            <h4 className="text-3xl font-bold text-blue-900 tracking-tight">
+              {formatCurrency(products.reduce((acc, p) => acc + (p.price * p.stockLevel), 0))}
+            </h4>
+            <p className="text-xs opacity-60">{products.length} insumos no catálogo</p>
           </div>
           <div className="bg-blue-100 p-4 rounded-2xl text-blue-600"><ArrowUpRight size={24} /></div>
         </div>
@@ -323,11 +327,70 @@ function CatalogoInsumos() {
       </div>
 
       {isModalOpen && (
-        <BudgetItemModal
+        <CatalogProductModal
           editingProduct={editingProduct}
           onClose={() => setIsModalOpen(false)}
           onComplete={() => { loadProducts(); setIsModalOpen(false); }}
         />
+      )}
+
+      {showSupplierModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+          >
+            <div className="p-6 bg-black text-white flex justify-between items-center">
+              <h3 className="font-bold text-lg">Sincronizar com Fornecedor</h3>
+              <button onClick={() => setShowSupplierModal(false)} className="hover:bg-white/20 p-2 rounded-full"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest opacity-60">URL Base</label>
+                <input
+                  type="url"
+                  value={supplierBaseUrl}
+                  onChange={e => setSupplierBaseUrl(e.target.value)}
+                  className="w-full p-4 bg-black/5 rounded-2xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-black"
+                  placeholder="https://api.supplier.com/v1"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest opacity-60">Chave da API</label>
+                <input
+                  type="password"
+                  value={supplierApiKey}
+                  onChange={e => setSupplierApiKey(e.target.value)}
+                  className="w-full p-4 bg-black/5 rounded-2xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-black"
+                  placeholder="••••••••"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowSupplierModal(false)}
+                  className="flex-1 py-3 text-xs font-bold uppercase tracking-widest opacity-60 hover:opacity-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    if (!supplierBaseUrl.trim() || !supplierApiKey.trim()) {
+                      toast.error('Preencha URL e chave da API.');
+                      return;
+                    }
+                    setShowSupplierModal(false);
+                    runSupplierSync(supplierBaseUrl, supplierApiKey);
+                  }}
+                  disabled={isSyncing}
+                  className="flex-[2] py-3 bg-orange-500 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-orange-600 disabled:opacity-40"
+                >
+                  {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );

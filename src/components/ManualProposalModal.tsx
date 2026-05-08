@@ -37,7 +37,7 @@ export function ManualProposalModal({ onClose, onComplete }: ManualProposalModal
         status: formData.status,
         validityDays: 30,
         deadline: '',
-        createdBy: user?.uid || 'manual',
+        createdBy: user?.id || 'manual',
         followUpDate: formData.followUpDate,
         contractDetails: {
           contractNumber: formData.contractNumber,

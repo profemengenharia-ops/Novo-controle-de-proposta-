@@ -5,23 +5,21 @@ import { aiService } from '../services/aiService';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'sonner';
 
-import { 
-  Check, 
-  ChevronRight, 
-  ChevronLeft, 
-  Sparkles, 
-  Trash2, 
-  Plus, 
-  Save, 
+import {
+  Check,
+  ChevronRight,
+  ChevronLeft,
+  Sparkles,
+  Trash2,
+  Plus,
+  Save,
   AlertCircle,
   FileSpreadsheet,
   PackageSearch,
   Zap,
   Calculator,
   TrendingUp,
-  Search,
-  Upload,
-  ArrowRight
+  Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
@@ -32,8 +30,11 @@ import { CommercialItem, PriceFormation, GlobalPriceFormation } from '../types';
 
 import { ProposalPrintView } from './ProposalPrintView';
 import { BudgetSelector } from './BudgetSelector';
-import { budgetProjectService } from '../services/budgetProjectService';
 import { BudgetProject } from '../types';
+import { normsService, Norm, Block } from '../services/normsService';
+import { calculateBDI } from '../lib/utils';
+import { crmService } from '../services/crmService';
+import { Vendor } from '../types';
 
 interface WizardProps {
   proposalId?: string;
@@ -50,6 +51,12 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [revisionNote, setRevisionNote] = useState('');
   const [selectedItemForPricing, setSelectedItemForPricing] = useState<{index: number, item: CommercialItem} | null>(null);
   const [showBudgetSelector, setShowBudgetSelector] = useState(false);
+  const [libraryNorms, setLibraryNorms] = useState<Norm[]>([]);
+  const [libraryBlocks, setLibraryBlocks] = useState<Block[]>([]);
+  const [newReference, setNewReference] = useState('');
+  const [newCustomNorm, setNewCustomNorm] = useState('');
+  const [validationErrors, setValidationErrors] = useState<{ clientName?: string; scopeTitle?: string }>({});
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   
   const [proposal, setProposal] = useState<Partial<Proposal>>({
     clientName: '',
@@ -101,10 +108,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       }
       load();
 
-      // Realtime subscription for pricing updates
       const unsubscribe = proposalService.subscribeToProposal(proposalId, (updated) => {
         setProposal(prev => {
-          // Only update if the status changed to 'calculado' or if there's significant data change
           if (prev.status === ProposalStatus.DRAFT && updated.status !== ProposalStatus.DRAFT) {
             toast.info(`Status da proposta atualizado para: ${updated.status.toUpperCase()}`);
           }
@@ -120,42 +125,62 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     }
   }, [proposalId]);
 
+  useEffect(() => {
+    normsService.getNorms().then(setLibraryNorms).catch(console.error);
+    normsService.getBlocks().then(setLibraryBlocks).catch(console.error);
+    crmService.getVendors().then(vs => setVendors(vs.filter(v => v.active))).catch(console.error);
+  }, []);
+
   const handleSave = async () => {
-    if (!proposal.clientName?.trim()) {
-      alert('Por favor, informe o nome do cliente.');
-      return;
-    }
-    if (!proposal.scopeTitle?.trim()) {
-      alert('Por favor, informe o título do escopo.');
+    const errors: { clientName?: string; scopeTitle?: string } = {};
+    if (!proposal.clientName?.trim()) errors.clientName = 'Informe o nome do cliente.';
+    if (!proposal.scopeTitle?.trim()) errors.scopeTitle = 'Informe o título do escopo.';
+    setValidationErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error('Há campos obrigatórios não preenchidos.');
+      setStep(1);
       return;
     }
 
     setLoading(true);
     try {
-      const finalTotal = calculateTotal(proposal.commercialProposal?.items || []);
+      const itemsTotal = calculateTotal(proposal.commercialProposal?.items || []);
+      const currentTotal = proposal.commercialProposal?.totalValue || 0;
+      // Preserva o totalValue se foi definido pela Formação de Preço (Step 5),
+      // detectado quando há um pricing aplicado e o total diverge da soma dos itens.
+      const userAppliedPricing =
+        !!proposal.pricing &&
+        proposal.pricing.items.length > 0 &&
+        currentTotal > 0 &&
+        Math.abs(currentTotal - itemsTotal) > 0.01;
+
+      const finalTotal = userAppliedPricing
+        ? currentTotal
+        : (itemsTotal > 0 ? itemsTotal : currentTotal);
+
       const proposalToSave = {
         ...proposal,
         commercialProposal: {
           ...proposal.commercialProposal!,
-          totalValue: finalTotal > 0 ? finalTotal : (proposal.commercialProposal?.totalValue || 0)
-        }
+          totalValue: finalTotal,
+        },
       };
 
       if (proposal.id) {
         let nextRev = proposal.revision || '00';
         if (revisionNote) {
           const revNum = parseInt(nextRev);
-          nextRev = String(revNum + 1).padStart(2, '0');
+          nextRev = String((Number.isFinite(revNum) ? revNum : 0) + 1).padStart(2, '0');
         }
 
-        await proposalService.updateProposal(proposal.id, { 
-          ...proposalToSave, 
-          revision: nextRev 
+        await proposalService.updateProposal(proposal.id, {
+          ...proposalToSave,
+          revision: nextRev,
         }, revisionNote);
       } else {
         await proposalService.createProposal({
           ...proposalToSave as Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'>,
-          createdBy: user?.id || ''
+          createdBy: user?.id || 'unknown'
         });
       }
       toast.success(proposal.id ? 'Proposta atualizada com sucesso!' : 'Proposta criada com sucesso!');
@@ -165,6 +190,41 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       toast.error('Erro ao salvar proposta. Tente novamente.');
     }
     setLoading(false);
+  };
+
+  const addReference = () => {
+    const ref = newReference.trim();
+    if (!ref) return;
+    updateTechnical('references', [...(proposal.technicalScope?.references || []), ref]);
+    setNewReference('');
+  };
+
+  const addCustomNorm = () => {
+    const norm = newCustomNorm.trim();
+    if (!norm) return;
+    if (proposal.technicalScope?.norms?.includes(norm)) {
+      toast.info('Norma já adicionada.');
+      return;
+    }
+    updateTechnical('norms', [...(proposal.technicalScope?.norms || []), norm]);
+    setNewCustomNorm('');
+  };
+
+  const insertBlock = (block: Block) => {
+    const lower = (block.type || '').toLowerCase();
+    let target: keyof Proposal['technicalScope'];
+    if (lower.includes('contratada')) target = 'contractorObligations';
+    else if (lower.includes('contratante')) target = 'contracteeObligations';
+    else if (lower.includes('exclus')) target = 'exclusions';
+    else target = 'contracteeObligations';
+
+    const current = (proposal.technicalScope?.[target] as string[] | undefined) || [];
+    if (current.includes(block.text)) {
+      toast.info('Este bloco já foi inserido.');
+      return;
+    }
+    updateTechnical(target, [...current, block.text]);
+    toast.success(`Bloco "${block.type}" inserido.`);
   };
 
   const [pricingInsight, setPricingInsight] = useState<string | null>(null);
@@ -236,38 +296,49 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   };
 
   const handleBudgetSelect = (project: BudgetProject) => {
-    // Import items from all stages
-    const importedItems: CommercialItem[] = project.stages.flatMap(stage => 
-      stage.items.map(item => ({
-        id: crypto.randomUUID(),
-        description: `[${stage.name}] ${item.description}`,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitPrice: item.unitCost * (1 + (project.bdi.calculatedBDI / 100)), // Apply BDI
-        totalPrice: 0, // Will be calculated below
-        source: 'engineering'
-      }))
+    // Recompute BDI on import (canonical formula). Never trust persisted calculatedBDI.
+    const bdiRate = calculateBDI({
+      ac: project.bdi.centralAdmin,
+      sg: project.bdi.insuranceAndGuarantees,
+      r: project.bdi.risks,
+      df: project.bdi.financialExpenses,
+      l: project.bdi.profit,
+      i: project.bdi.taxes,
+    });
+
+    if (bdiRate <= 0) {
+      toast.warning('Atenção: BDI calculado é zero ou negativo. Verifique a configuração do orçamento.');
+    }
+
+    const importedItems: CommercialItem[] = project.stages.flatMap(stage =>
+      stage.items.map(item => {
+        const unitPrice = item.unitCost * (1 + bdiRate);
+        return {
+          id: crypto.randomUUID(),
+          description: `[${stage.name}] ${item.description}`,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPrice,
+          totalPrice: item.quantity * unitPrice,
+          source: 'engineering' as const,
+        };
+      })
     );
 
-    // Calculate total price for each imported item
-    const finalizedItems = importedItems.map(item => ({
-      ...item,
-      totalPrice: item.quantity * item.unitPrice
-    }));
-
-    updateCommercial('items', [...(proposal.commercialProposal?.items || []), ...finalizedItems]);
+    updateCommercial('items', [...(proposal.commercialProposal?.items || []), ...importedItems]);
     setShowBudgetSelector(false);
-    toast.success(`${finalizedItems.length} itens importados de "${project.title}"`);
+    toast.success(
+      `${importedItems.length} itens importados de "${project.title}" (BDI ${(bdiRate * 100).toFixed(2)}%)`
+    );
   };
 
   const steps = [
     { title: 'Geral', icon: 1 },
     { title: 'Referências', icon: 2 },
     { title: 'Técnico', icon: 3 },
-    { title: 'Comercial', icon: 4 },
-    { title: 'Preço', icon: 5 },
-    { title: 'Workbench', icon: 6 },
+    { title: 'Comercial & Preço', icon: 4 },
   ];
+  const TOTAL_STEPS = steps.length;
 
   const updateTechnical = (key: keyof Proposal['technicalScope'], value: any) => {
     setProposal(prev => ({
@@ -373,23 +444,41 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                       <div className="grid grid-cols-2 gap-6">
                         <div className="space-y-2 col-span-2">
                           <label className="text-xs font-bold uppercase tracking-widest opacity-40">Escopo da Proposta (Título)</label>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             value={proposal.scopeTitle || ''}
-                            onChange={e => setProposal({...proposal, scopeTitle: e.target.value})}
+                            onChange={e => {
+                              setProposal({ ...proposal, scopeTitle: e.target.value });
+                              if (validationErrors.scopeTitle && e.target.value.trim()) setValidationErrors(prev => ({ ...prev, scopeTitle: undefined }));
+                            }}
                             placeholder="Ex: Instalação de Sistema de Incêndio - Prédio Comercial"
-                            className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-bold text-lg"
+                            className={cn(
+                              "w-full p-4 rounded-xl border-transparent focus:ring-0 transition-all font-bold text-lg",
+                              validationErrors.scopeTitle
+                                ? "bg-red-50 border border-red-200 focus:border-red-400"
+                                : "bg-black/5 focus:border-[var(--color-brand-primary)]"
+                            )}
                           />
+                          {validationErrors.scopeTitle && <p className="text-xs text-red-600 font-medium">{validationErrors.scopeTitle}</p>}
                         </div>
                         <div className="space-y-2">
                           <label className="text-xs font-bold uppercase tracking-widest opacity-40">Cliente / Empresa</label>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             value={proposal.clientName}
-                            onChange={e => setProposal({...proposal, clientName: e.target.value})}
+                            onChange={e => {
+                              setProposal({ ...proposal, clientName: e.target.value });
+                              if (validationErrors.clientName && e.target.value.trim()) setValidationErrors(prev => ({ ...prev, clientName: undefined }));
+                            }}
                             placeholder="Ex: FRACAZA ADMINISTRACAO..."
-                            className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-medium"
+                            className={cn(
+                              "w-full p-4 rounded-xl border-transparent focus:ring-0 transition-all font-medium",
+                              validationErrors.clientName
+                                ? "bg-red-50 border border-red-200 focus:border-red-400"
+                                : "bg-black/5 focus:border-[var(--color-brand-primary)]"
+                            )}
                           />
+                          {validationErrors.clientName && <p className="text-xs text-red-600 font-medium">{validationErrors.clientName}</p>}
                         </div>
                         <div className="space-y-2">
                            <label className="text-xs font-bold uppercase tracking-widest opacity-40">Número da Proposta</label>
@@ -411,12 +500,33 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                         </div>
                         <div className="space-y-2">
                            <label className="text-xs font-bold uppercase tracking-widest opacity-40">Validade (Dias)</label>
-                           <input 
-                            type="number" 
-                            value={proposal.validityDays}
-                            onChange={e => setProposal({...proposal, validityDays: parseInt(e.target.value)})}
+                           <input
+                            type="number"
+                            min={1}
+                            value={proposal.validityDays ?? ''}
+                            onChange={e => {
+                              const v = parseInt(e.target.value);
+                              setProposal({ ...proposal, validityDays: Number.isFinite(v) && v > 0 ? v : 0 });
+                            }}
                             className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)]"
                           />
+                        </div>
+
+                        <div className="space-y-2 col-span-2">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Vendedor Responsável</label>
+                          <select
+                            value={proposal.vendorId ?? ''}
+                            onChange={e => {
+                              const v = vendors.find(v => v.id === e.target.value);
+                              setProposal({ ...proposal, vendorId: v?.id ?? '', vendorName: v?.name ?? '' });
+                            }}
+                            className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-medium appearance-none"
+                          >
+                            <option value="">— Sem responsável —</option>
+                            {vendors.map(v => (
+                              <option key={v.id} value={v.id}>{v.name}{v.role ? ` · ${v.role}` : ''}</option>
+                            ))}
+                          </select>
                         </div>
 
                         {/* Detalhes do Contrato */}
@@ -477,7 +587,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                   )}
 
                   {step === 2 && (
-                    <motion.div 
+                    <motion.div
                        key="step-2"
                        initial={{ opacity: 0, x: 20 }}
                        animate={{ opacity: 1, x: 0 }}
@@ -485,26 +595,32 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                        className="space-y-8 flex-1"
                     >
                       <div className="space-y-4">
-                         <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold uppercase tracking-widest opacity-40">Referências de Projeto</label>
-                            <button 
-                              onClick={() => {
-                                const name = prompt('Nome da referência:');
-                                if (name) updateTechnical('references', [...(proposal.technicalScope?.references || []), name]);
-                              }}
-                              className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center"
-                            >
-                              <Plus size={14} className="mr-1" /> Adicionar
-                            </button>
+                         <label className="text-xs font-bold uppercase tracking-widest opacity-40">Referências de Projeto</label>
+                         <div className="flex gap-2">
+                           <input
+                             type="text"
+                             value={newReference}
+                             onChange={e => setNewReference(e.target.value)}
+                             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addReference(); } }}
+                             placeholder="Ex: Projeto Hidráulico Rev 03 ou URL..."
+                             className="flex-1 p-3 bg-black/5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                           />
+                           <button
+                             onClick={addReference}
+                             disabled={!newReference.trim()}
+                             className="px-4 py-2 bg-[var(--color-brand-primary)] text-white rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40"
+                           >
+                             <Plus size={14} /> Adicionar
+                           </button>
                          </div>
                           <div className="flex flex-wrap gap-2">
                             {proposal.technicalScope?.references?.map((ref, i) => (
                               <div key={i} className="bg-black/5 px-3 py-2 rounded-lg flex items-center gap-2 text-sm font-medium">
                                 {ref?.toLowerCase().startsWith('http') ? (
-                                  <a 
-                                    href={ref} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
+                                  <a
+                                    href={ref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
                                     className="text-[var(--color-brand-primary)] hover:underline truncate max-w-[200px]"
                                   >
                                     {ref}
@@ -522,59 +638,84 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                       </div>
 
                       <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Normas Técnicas Aplicáveis</label>
-                          <button 
-                            onClick={() => {
-                              const name = prompt('Nome da norma técnica:');
-                              if (name) updateTechnical('norms', [...(proposal.technicalScope?.norms || []), name]);
-                            }}
-                            className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center"
+                        <label className="text-xs font-bold uppercase tracking-widest opacity-40">Normas Técnicas Aplicáveis</label>
+                        {libraryNorms.length === 0 ? (
+                          <p className="text-xs opacity-40 italic">Nenhuma norma cadastrada na biblioteca. Cadastre em "Normas & Blocos".</p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3">
+                            {libraryNorms.map((libNorm) => {
+                              const label = libNorm.title;
+                              const checked = proposal.technicalScope?.norms?.includes(label) || false;
+                              return (
+                                <label key={libNorm.id} className={cn(
+                                  "flex flex-col gap-1 p-4 rounded-xl border transition-all cursor-pointer",
+                                  checked ? "bg-[var(--color-brand-primary)]/5 border-[var(--color-brand-primary)]" : "border-black/5 hover:border-black/10"
+                                )}>
+                                  <input
+                                    type="checkbox"
+                                    className="hidden"
+                                    checked={checked}
+                                    onChange={() => {
+                                      const current = proposal.technicalScope?.norms || [];
+                                      const next = current.includes(label) ? current.filter(n => n !== label) : [...current, label];
+                                      updateTechnical('norms', next);
+                                    }}
+                                  />
+                                  <span className="text-sm font-medium">{label}</span>
+                                  {libNorm.description && <span className="text-[10px] opacity-50">{libNorm.description}</span>}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div className="flex gap-2 pt-2">
+                          <input
+                            type="text"
+                            value={newCustomNorm}
+                            onChange={e => setNewCustomNorm(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomNorm(); } }}
+                            placeholder="Norma personalizada (ex: ABNT NBR 17240)..."
+                            className="flex-1 p-3 bg-black/5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                          />
+                          <button
+                            onClick={addCustomNorm}
+                            disabled={!newCustomNorm.trim()}
+                            className="px-4 py-2 border border-[var(--color-brand-primary)] text-[var(--color-brand-primary)] rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40"
                           >
-                            <Plus size={14} className="mr-1" /> Adicionar Personalizada
+                            <Plus size={14} /> Personalizada
                           </button>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {[
-                            "Decreto Estadual Corpo de Bombeiros SP 56.819/2011",
-                            "NR 10 - Instalações e Serviços em Eletricidade",
-                            "NR 33 - Espaços Confinados",
-                            "NR 35 - Trabalhos em Altura"
-                          ].map((norm) => (
-                            <label key={norm} className={cn(
-                              "flex items-center p-4 rounded-xl border transition-all cursor-pointer",
-                              proposal.technicalScope?.norms?.includes(norm) ? "bg-[var(--color-brand-primary)]/5 border-[var(--color-brand-primary)]" : "border-black/5 hover:border-black/10"
-                            )}>
-                              <input 
-                                type="checkbox" 
-                                className="hidden"
-                                checked={proposal.technicalScope?.norms?.includes(norm) || false}
-                                onChange={() => {
-                                  const current = proposal.technicalScope?.norms || [];
-                                  const next = current.includes(norm) ? current.filter(n => n !== norm) : [...current, norm];
-                                  updateTechnical('norms', next);
-                                }}
-                              />
-                              <span className="text-sm font-medium">{norm}</span>
-                            </label>
-                          ))}
-                          
-                          {/* Custom norms */}
-                          {proposal.technicalScope?.norms?.filter(n => ![
-                            "Decreto Estadual Corpo de Bombeiros SP 56.819/2011",
-                            "NR 10 - Instalações e Serviços em Eletricidade",
-                            "NR 33 - Espaços Confinados",
-                            "NR 35 - Trabalhos em Altura"
-                          ].includes(n)).map((norm) => (
-                            <div key={norm} className="flex items-center p-4 rounded-xl border border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/5 justify-between">
-                              <span className="text-sm font-medium">{norm}</span>
-                              <button onClick={() => updateTechnical('norms', (proposal.technicalScope?.norms || []).filter(n => n !== norm))}>
-                                <Trash2 size={12} className="text-red-500" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+
+                        {/* Selected custom norms (those not in library) */}
+                        {proposal.technicalScope?.norms?.filter(n => !libraryNorms.some(ln => ln.title === n)).map((norm) => (
+                          <div key={norm} className="flex items-center p-3 rounded-xl border border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/5 justify-between">
+                            <span className="text-sm font-medium">{norm}</span>
+                            <button onClick={() => updateTechnical('norms', (proposal.technicalScope?.norms || []).filter(n => n !== norm))}>
+                              <Trash2 size={12} className="text-red-500" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
+
+                      {libraryBlocks.length > 0 && (
+                        <div className="space-y-3 pt-4 border-t border-black/5">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Inserir Blocos Padrão</label>
+                          <p className="text-[10px] opacity-50 italic">Insere o texto do bloco em Obrigações ou Exclusões conforme o tipo cadastrado.</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {libraryBlocks.map(b => (
+                              <button
+                                key={b.id}
+                                onClick={() => insertBlock(b)}
+                                className="text-left bg-white border border-black/5 hover:border-[var(--color-brand-primary)] p-3 rounded-xl transition-all"
+                              >
+                                <div className="text-[10px] font-bold uppercase tracking-tighter bg-black/5 px-2 py-1 rounded w-fit mb-2">{b.type || 'GERAL'}</div>
+                                <p className="text-[11px] opacity-60 italic line-clamp-2">"{b.text}"</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -881,7 +1022,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                           </div>
                           <div className="space-y-4">
                             <label className="text-xs font-bold uppercase tracking-widest opacity-40">Garantia</label>
-                            <textarea 
+                            <textarea
                               value={proposal.commercialProposal?.guarantee}
                               onChange={e => updateCommercial('guarantee', e.target.value)}
                               rows={2}
@@ -889,108 +1030,28 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                             />
                           </div>
                        </div>
+
+                       <div className="pt-8 mt-8 border-t border-black/10 space-y-2">
+                         <div className="flex items-center gap-2 text-[var(--color-brand-primary)]">
+                           <Calculator size={16} />
+                           <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Composição de Preço (BDI)</span>
+                         </div>
+                         <p className="text-xs opacity-50 italic">
+                           Opcional. Use para detalhar custos diretos, indiretos e BDI.
+                           O valor calculado pode ser aplicado ao total da proposta clicando em "Aplicar à Proposta".
+                         </p>
+                       </div>
+
+                       <PricingFormulation
+                         proposal={proposal}
+                         onChange={(pricing) => setProposal(prev => ({ ...prev, pricing }))}
+                         onApply={(total) => {
+                           updateCommercial('totalValue', total);
+                         }}
+                       />
                     </motion.div>
                   )}
 
-                  {step === 5 && (
-                    <motion.div 
-                       key="step-5"
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       exit={{ opacity: 0, x: -20 }}
-                       className="flex-1"
-                    >
-                      <PricingFormulation 
-                        proposal={proposal}
-                        onChange={(pricing) => setProposal(prev => ({ ...prev, pricing }))}
-                        onApply={(total) => {
-                          updateCommercial('totalValue', total);
-                        }}
-                      />
-                    </motion.div>
-                  )}
-
-                  {step === 6 && (
-                    <motion.div 
-                       key="step-6"
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       exit={{ opacity: 0, x: -20 }}
-                       className="space-y-8 flex-1"
-                    >
-                      <div className="flex flex-col gap-6">
-                        <div className="bg-neutral-900 text-white p-8 rounded-[2rem] shadow-2xl space-y-8 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl -mr-32 -mt-32" />
-                          
-                          <div className="flex items-center justify-between relative z-10">
-                            <div>
-                              <h3 className="text-2xl font-black tracking-tight uppercase">Engenharia Financeira ERP</h3>
-                              <p className="text-xs font-bold text-white/40 uppercase tracking-widest">Pricing Workbench & Margin Analysis</p>
-                            </div>
-                            <div className="bg-white/10 px-4 py-2 rounded-xl backdrop-blur-md border border-white/10">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 mr-3">Status Global:</span>
-                              <span className="text-sm font-black text-green-400 uppercase tracking-tighter">Saudável</span>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-4">
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Valor Total da Proposta</span>
-                              <p className="text-3xl font-black tabular-nums tracking-tighter">{formatCurrency(proposal.commercialProposal?.totalValue || 0)}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Custo Direto Total</span>
-                              <p className="text-3xl font-black tabular-nums tracking-tighter opacity-60">{formatCurrency((proposal.commercialProposal?.totalValue || 0) * 0.7)}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Lucro Bruto Estimado</span>
-                              <p className="text-3xl font-black tabular-nums tracking-tighter text-[var(--color-brand-primary)]">{formatCurrency((proposal.commercialProposal?.totalValue || 0) * 0.15)}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                           <div className="bg-white p-6 rounded-2xl border border-black/5 space-y-4">
-                             <h4 className="text-xs font-black uppercase tracking-widest text-neutral-400">Análise de Pontos de Equilíbrio</h4>
-                             <div className="h-40 flex items-end gap-2 px-2">
-                               {[45, 60, 30, 80, 50, 90, 40].map((h, i) => (
-                                 <div key={i} className="flex-1 bg-black/5 rounded-t-lg relative group transition-all hover:bg-[var(--color-brand-primary)]" style={{height: `${h}%`}}>
-                                   <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[8px] font-bold opacity-0 group-hover:opacity-100 transition-opacity">R$ {h}k</div>
-                                 </div>
-                               ))}
-                             </div>
-                             <div className="flex justify-between text-[9px] font-black uppercase tracking-widest opacity-30 pt-2 border-t border-black/5">
-                               <span>Jan</span><span>Fev</span><span>Mar</span><span>Abr</span><span>Mai</span><span>Jun</span><span>Jul</span>
-                             </div>
-                           </div>
-
-                           <div className="bg-white p-6 rounded-2xl border border-black/5 space-y-6">
-                             <h4 className="text-xs font-black uppercase tracking-widest text-neutral-400">Guardrails & Riscos</h4>
-                             <div className="space-y-4">
-                               {[
-                                 { label: 'Margem de Contribuição', value: 24, status: 'healthy' },
-                                 { label: 'Custo de Aquisição (CAC)', value: 8, status: 'healthy' },
-                                 { label: 'Exposição Financeira', value: 12, status: 'warning' }
-                               ].map((g, i) => (
-                                 <div key={i} className="space-y-2">
-                                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest">
-                                     <span>{g.label}</span>
-                                     <span>{g.value}%</span>
-                                   </div>
-                                   <div className="h-1.5 bg-black/5 rounded-full overflow-hidden">
-                                     <div 
-                                      className={cn("h-full rounded-full transition-all duration-1000", g.status === 'healthy' ? 'bg-green-400' : 'bg-yellow-400')} 
-                                      style={{width: `${g.value * 3}%`}} 
-                                     />
-                                   </div>
-                                 </div>
-                               ))}
-                             </div>
-                           </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
                 </AnimatePresence>
 
                 {/* Footer actions */}
@@ -1012,8 +1073,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                         <Save size={16} /> {loading ? 'Salvando...' : 'Salvar Rascunho'}
                       </button>
                       
-                      {step < 6 ? (
-                        <button 
+                      {step < TOTAL_STEPS ? (
+                        <button
                           onClick={() => setStep(step + 1)}
                           className="px-8 py-2 bg-[var(--color-brand-primary)] text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:opacity-90 transition-all font-mono"
                         >

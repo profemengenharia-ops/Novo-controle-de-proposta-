@@ -4,13 +4,13 @@ import { inventoryService } from '../services/inventoryService';
 import { X, Save, ClipboardList, Tag, Hash, DollarSign } from 'lucide-react';
 import { motion } from 'motion/react';
 
-interface InventoryItemModalProps {
+interface CatalogProductModalProps {
   onClose: () => void;
   onComplete: () => void;
   editingProduct?: Product | null;
 }
 
-export function BudgetItemModal({ onClose, onComplete, editingProduct }: InventoryItemModalProps) {
+export function CatalogProductModal({ onClose, onComplete, editingProduct }: CatalogProductModalProps) {
   const [loading, setLoading] = useState(false);
   const [priceError, setPriceError] = useState('');
   const [formData, setFormData] = useState({

@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { confirmAction } from '../hooks/useConfirm';
 
 interface Props {
   onOpen: (project: BudgetProject) => void;
@@ -87,10 +88,20 @@ export function BudgetProjectList({ onOpen }: Props) {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm('Excluir este orçamento permanentemente?')) return;
-    await budgetProjectService.delete(id);
-    toast.success('Orçamento excluído.');
-    load();
+    const ok = await confirmAction({
+      title: 'Excluir orçamento?',
+      description: 'Esta ação é permanente.',
+      confirmLabel: 'Excluir',
+    });
+    if (!ok) return;
+    try {
+      await budgetProjectService.delete(id);
+      toast.success('Orçamento excluído.');
+      load();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao excluir.');
+    }
   };
 
   const totalItems = (p: BudgetProject) => p.stages.reduce((s, st) => s + st.items.length, 0);

@@ -43,7 +43,8 @@ export function PriceFormationModal({ initialData, onSave, onClose, itemDescript
     suggestedPrice: finalPrice,
     netProfit,
     realMarginPercent: marginPercent,
-    status
+    status,
+    calculatedBDI: calculatedBDIPercent,
   } = usePricingEngine(
     [
       { unitCost: cd.materials, quantity: 1 },
@@ -51,15 +52,11 @@ export function PriceFormationModal({ initialData, onSave, onClose, itemDescript
       { unitCost: cd.equipment, quantity: 1 },
       { unitCost: cd.subcontractors, quantity: 1 }
     ],
-    {
-      taxRate: bdiConfig.taxes / 100,
-      adminOverhead: (bdiConfig.centralAdmin + bdiConfig.financialExpenses + bdiConfig.insuranceAndGuarantees + bdiConfig.risks) / 100,
-      desiredMargin: bdiConfig.profit / 100,
-      indirectCosts: totalCI
-    }
+    totalCI,
+    bdiConfig
   );
 
-  const calculatedBDI = totalCost > 0 ? (finalPrice / totalCost) - 1 : 0;
+  const calculatedBDI = calculatedBDIPercent / 100;
   const marginHealth = status === 'CRITICAL' ? 'critical' : status === 'WARNING' ? 'warning' : 'healthy';
 
   const handleSave = () => {

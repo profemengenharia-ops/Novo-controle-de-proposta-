@@ -9,11 +9,8 @@ import {
   ExternalLink, 
   Edit, 
   Trash2,
-  Copy,
   Bell,
   MessageSquare,
-  ChevronDown,
-  ChevronUp,
   Download,
   History,
   Send,
@@ -31,6 +28,7 @@ import {
 import { formatCurrency, formatDate, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { STATUS_TAGS } from '../constants';
+import { toast } from 'sonner';
 
 interface ProposalListProps {
   onEdit: (id: string) => void;
@@ -48,6 +46,7 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   const [lossReasonProposalId, setLossReasonProposalId] = useState<string | null>(null);
   const [lossReason, setLossReason] = useState('');
   const [activeTab, setActiveTab] = useState<Record<string, 'overview' | 'technical' | 'commercial' | 'history'>>({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const setProposalTab = (id: string, tab: 'overview' | 'technical' | 'commercial' | 'history') => {
     setActiveTab(prev => ({ ...prev, [id]: tab }));
@@ -70,10 +69,21 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     return matchesSearch && matchesStatus;
   });
 
-  const handleDelete = async (id: string) => {
-    if (confirm('Deseja realmente excluir esta proposta?')) {
-      await proposalService.deleteProposal(id);
-      setProposals(proposals.filter(p => p.id !== id));
+  const handleDelete = (id: string) => {
+    setConfirmDeleteId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmDeleteId) return;
+    try {
+      await proposalService.deleteProposal(confirmDeleteId);
+      setProposals(proposals.filter(p => p.id !== confirmDeleteId));
+      toast.success('Proposta excluída.');
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao excluir proposta.');
+    } finally {
+      setConfirmDeleteId(null);
     }
   };
 
@@ -105,19 +115,24 @@ export function ProposalList({ onEdit }: ProposalListProps) {
 
   const handleDuplicateWithRevision = async (p: Proposal) => {
     const { id, createdAt, updatedAt, ...rest } = p;
-    const nextRev = String(parseInt(rest.revision) + 1).padStart(2, '0');
+    const baseRev = parseInt(rest.revision);
+    const nextRev = String((Number.isFinite(baseRev) ? baseRev : 0) + 1).padStart(2, '0');
     const newProposal: Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'> = {
       ...rest,
       revision: nextRev,
       status: ProposalStatus.DRAFT,
     };
-    // In a real app we'd call createProposal
-    const newId = await proposalService.createProposal(newProposal);
-    const createdProposal = await proposalService.getProposal(newId);
-    if (createdProposal) {
-      setProposals([createdProposal, ...proposals]);
+    try {
+      const newId = await proposalService.createProposal(newProposal);
+      const createdProposal = await proposalService.getProposal(newId);
+      if (createdProposal) {
+        setProposals([createdProposal, ...proposals]);
+      }
+      toast.success(`Revisão ${nextRev} gerada com sucesso!`);
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao duplicar proposta.');
     }
-    alert(`Revisão ${nextRev} gerada com sucesso!`);
   };
 
   const handleStatusUpdate = async (id: string, newStatus: ProposalStatus) => {
@@ -187,8 +202,8 @@ export function ProposalList({ onEdit }: ProposalListProps) {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-        <table className="w-full text-left">
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-x-auto">
+        <table className="w-full text-left min-w-[900px]">
           <thead className="bg-black/[0.02]">
             <tr className="text-[10px] font-bold uppercase tracking-widest opacity-40">
               <th className="px-8 py-4">ID & Rev</th>
@@ -668,6 +683,43 @@ export function ProposalList({ onEdit }: ProposalListProps) {
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-8 space-y-6"
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center shrink-0">
+                  <AlertCircle size={24} className="text-red-600" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-bold text-lg">Excluir proposta?</h3>
+                  <p className="text-xs opacity-60">Esta ação não pode ser desfeita.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-3 text-xs font-bold uppercase tracking-widest opacity-60 hover:opacity-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-[2] py-3 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-700 transition-all"
+                >
+                  Excluir
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

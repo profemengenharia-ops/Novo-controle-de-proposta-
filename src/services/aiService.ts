@@ -3,6 +3,7 @@ import retry from "async-retry";
 import { TechnicalScopeItem, Proposal } from "../types";
 import { safeParseJSON } from "../lib/utils";
 import { toast } from "sonner";
+import { GEMINI_MODEL } from "../config/aiConfig";
 
 const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || '' });
 
@@ -52,9 +53,9 @@ async function callAIWithRetry<T>(
       minTimeout: 5000, // Start with 5s
       maxTimeout: 60000, // Max 60s
       factor: 2,
-      onRetry: (error, attempt) => {
-        // If it's a 503, we might want to log a specific message
-        if (error.message.includes("503") || error.message.includes("capacity")) {
+      onRetry: (error: unknown, attempt) => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("503") || message.includes("capacity")) {
            toast.info(`Capacidade esgotada. Tentativa ${attempt}/5 em instantes...`, {
              description: "O Google Gemini está sob alta carga. Estamos aguardando a liberação."
            });
@@ -68,7 +69,7 @@ export const aiService = {
   async generateTechnicalScope(prompt: string): Promise<TechnicalScopeItem[]> {
     const result = await callAIWithRetry(async () => {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           systemInstruction: `Você é um engenheiro especialista em sistemas de combate a incêndio. 
@@ -88,7 +89,7 @@ export const aiService = {
   async extractQuantities(text: string): Promise<any> {
     const result = await callAIWithRetry(async () => {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: text,
         config: {
           systemInstruction: `Extraia quantidades de materiais de combate a incêndio (bombas, mangueiras, botoeiras, sirenes, etc) do texto fornecido.
@@ -106,7 +107,7 @@ export const aiService = {
   async analyzePricingRisk(proposal: any, history: any[]): Promise<string> {
     const result = await callAIWithRetry(async () => {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: `Proposta Atual: ${JSON.stringify(proposal)}. Histórico: ${JSON.stringify(history)}`,
         config: {
           systemInstruction: `Você é um CFO virtual especialista em engenharia. 
@@ -137,7 +138,7 @@ export const aiService = {
       - O tom deve ser de parceria técnica, sem ser "chato".`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: promptText
       });
       return response.text;
@@ -167,7 +168,7 @@ export const aiService = {
       Seja direto, data-driven e use um tom de consultor sênior.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: promptText
       });
       return response.text;
@@ -179,7 +180,7 @@ export const aiService = {
   async parseSpreadsheetColumns(headers: string[]): Promise<any> {
     const result = await callAIWithRetry(async () => {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: `Cabeçalhos: ${headers.join(", ")}`,
         config: { 
           systemInstruction: `Analise os cabeçalhos de uma planilha e mapeie para as chaves: "description", "quantity", "unit", "price". 

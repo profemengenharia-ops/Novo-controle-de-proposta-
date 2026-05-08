@@ -1,70 +1,74 @@
 import { useMemo } from 'react';
-
-export interface PricingSettings {
-  taxRate: number;        // Ex: 0.15 para 15%
-  adminOverhead: number;  // Custos fixos/adm (Ex: 0.10)
-  desiredMargin: number;  // Lucro líquido pretendido (Ex: 0.20)
-  indirectCosts: number;  // Valor nominal de logística/EPIs (Ex: 1500)
-}
+import { BDIConfig } from '../types';
+import { calculateBDI } from '../lib/utils';
 
 export interface PricingItem {
   unitCost: number;
   quantity: number;
 }
 
+export interface PricingEngineResult {
+  directCost: number;
+  indirectCosts: number;
+  totalCost: number;
+  bdiRate: number;
+  calculatedBDI: number;
+  suggestedPrice: number;
+  taxesValue: number;
+  netProfit: number;
+  realMarginPercent: string;
+  markup: string;
+  status: 'CRITICAL' | 'WARNING' | 'HEALTHY';
+}
+
 /**
- * usePricingEngine
- * 
- * Este hook calcula o preço de venda usando o método do Markup Divisor, 
- * que é o padrão para garantir que as porcentagens de impostos e lucro 
- * incidam sobre o preço final, e não apenas sobre o custo.
+ * Engine de preço canônico.
+ * Usa a fórmula multiplicativa do TCU (Acórdão 2622/2013) implementada em calculateBDI().
+ *
+ *   BDI = [(1 + AC + S+G + R) * (1 + DF) * (1 + L)] / (1 - I) - 1
+ *   Preço = CustoTotal * (1 + BDI)
  */
-export const usePricingEngine = (items: PricingItem[], settings: PricingSettings) => {
-  const calculation = useMemo(() => {
-    // 1. Custo Direto (Soma de Materiais e Mão de Obra)
-    const directCost = items.reduce(
-      (acc, item) => acc + (item.unitCost * item.quantity),
-      0
-    );
+export const usePricingEngine = (
+  items: PricingItem[],
+  indirectCosts: number,
+  bdi: BDIConfig,
+): PricingEngineResult => {
+  return useMemo(() => {
+    const directCost = items.reduce((acc, i) => acc + i.unitCost * i.quantity, 0);
+    const totalCost = directCost + indirectCosts;
 
-    // 2. Custo Total de Execução
-    const totalCost = directCost + settings.indirectCosts;
+    const bdiRate = calculateBDI({
+      ac: bdi.centralAdmin,
+      sg: bdi.insuranceAndGuarantees,
+      r: bdi.risks,
+      df: bdi.financialExpenses,
+      l: bdi.profit,
+      i: bdi.taxes,
+    });
 
-    /**
-     * 3. Cálculo do BDI Divisor
-     * Fórmula: Preço = Custo / (1 - Σ taxas)
-     * Onde taxas = Impostos + Adm + Margem Desejada
-     */
-    const totalFeesRate = settings.taxRate + settings.adminOverhead + settings.desiredMargin;
-    
-    // Trava de segurança para evitar divisão por zero ou negativa
-    const divisor = totalFeesRate >= 1 ? 0.01 : 1 - totalFeesRate;
-    
-    const suggestedPrice = totalCost / divisor;
+    const suggestedPrice = totalCost * (1 + bdiRate);
+    const taxesValue = suggestedPrice * (bdi.taxes / 100);
+    const netProfit = suggestedPrice - totalCost - taxesValue;
 
-    // 4. Detalhamento dos Resultados
-    const taxesValue = suggestedPrice * settings.taxRate;
-    const adminValue = suggestedPrice * settings.adminOverhead;
-    const netProfit = suggestedPrice - totalCost - taxesValue - adminValue;
-    
-    // 5. Indicadores de Saúde Financeira
+    const calculatedBDI = bdiRate * 100;
     const markup = totalCost > 0 ? suggestedPrice / totalCost : 0;
     const realMarginPercent = suggestedPrice > 0 ? (netProfit / suggestedPrice) * 100 : 0;
 
+    const status: 'CRITICAL' | 'WARNING' | 'HEALTHY' =
+      realMarginPercent < 5 ? 'CRITICAL' : realMarginPercent < 15 ? 'WARNING' : 'HEALTHY';
+
     return {
       directCost,
-      indirectCosts: settings.indirectCosts,
+      indirectCosts,
       totalCost,
+      bdiRate,
+      calculatedBDI,
       suggestedPrice,
       taxesValue,
-      adminValue,
       netProfit,
       markup: markup.toFixed(2),
       realMarginPercent: realMarginPercent.toFixed(2),
-      // Alerta de saúde financeira
-      status: realMarginPercent < 5 ? 'CRITICAL' : realMarginPercent < 15 ? 'WARNING' : 'HEALTHY'
+      status,
     };
-  }, [items, settings]);
-
-  return calculation;
+  }, [items, indirectCosts, bdi]);
 };

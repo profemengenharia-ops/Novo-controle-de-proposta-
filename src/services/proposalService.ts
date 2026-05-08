@@ -1,9 +1,41 @@
 import { supabase, isMockMode } from '../lib/supabase';
-import { Proposal, ProposalStatus } from '../types';
+import { Proposal, ProposalRevision, ProposalStatus } from '../types';
 
 const TABLE_NAME = 'proposals';
 
-// Helper to map DB snake_case to Frontend camelCase
+const MOCK_STORAGE_KEY = 'mock_proposals_v1';
+
+const loadMockStore = (): Proposal[] => {
+  try {
+    const raw = localStorage.getItem(MOCK_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as Proposal[];
+  } catch (e) {
+    console.warn('Mock store parse failed, resetting.', e);
+  }
+  const seed: Proposal[] = [
+    {
+      id: 'mock-seed-1',
+      clientName: 'Cliente Mock Exemplo',
+      proposalNumber: '2024-001',
+      status: ProposalStatus.DRAFT,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: 'mock-user-id',
+      revision: '00',
+      validityDays: 30,
+      technicalScope: { items: [] } as any,
+      commercialProposal: { totalValue: 50000, items: [] } as any,
+      deadline: '30 dias'
+    }
+  ];
+  localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(seed));
+  return seed;
+};
+
+const saveMockStore = (items: Proposal[]) => {
+  localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(items));
+};
+
 const mapFromDb = (row: any): Proposal => ({
   id: row.id,
   clientName: row.client_name,
@@ -22,9 +54,11 @@ const mapFromDb = (row: any): Proposal => ({
   createdBy: row.created_by,
   revisions: row.revisions,
   lossReason: row.loss_reason,
+  deadline: row.deadline ?? '',
+  vendorId: row.vendor_id,
+  vendorName: row.vendor_name,
 });
 
-// Helper to map Frontend camelCase to DB snake_case
 const mapToDb = (proposal: Partial<Proposal>) => {
   const data: any = {};
   if (proposal.clientName !== undefined) data.client_name = proposal.clientName;
@@ -41,14 +75,25 @@ const mapToDb = (proposal: Partial<Proposal>) => {
   if (proposal.createdBy !== undefined) data.created_by = proposal.createdBy;
   if (proposal.revisions !== undefined) data.revisions = proposal.revisions;
   if (proposal.lossReason !== undefined) data.loss_reason = proposal.lossReason;
+  if (proposal.vendorId !== undefined) data.vendor_id = proposal.vendorId;
+  if (proposal.vendorName !== undefined) data.vendor_name = proposal.vendorName;
   return data;
 };
 
 export const proposalService = {
   async createProposal(proposal: Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     if (isMockMode) {
-      console.log('Mock Create:', proposal);
-      return crypto.randomUUID();
+      const now = new Date().toISOString();
+      const newProposal: Proposal = {
+        ...(proposal as Proposal),
+        id: crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const store = loadMockStore();
+      store.unshift(newProposal);
+      saveMockStore(store);
+      return newProposal.id;
     }
     const data = mapToDb(proposal);
     const { data: inserted, error } = await supabase
@@ -62,7 +107,9 @@ export const proposalService = {
   },
 
   async getProposal(id: string): Promise<Proposal | null> {
-    if (isMockMode) return null;
+    if (isMockMode) {
+      return loadMockStore().find(p => p.id === id) ?? null;
+    }
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .select('*')
@@ -75,22 +122,7 @@ export const proposalService = {
 
   async getAllProposals(): Promise<Proposal[]> {
     if (isMockMode) {
-      return [
-        {
-          id: '1',
-          clientName: 'Cliente Mock Exemplo',
-          proposalNumber: '2024-001',
-          status: ProposalStatus.DRAFT,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          createdBy: 'mock-user-id',
-          revision: '00',
-          validityDays: 30,
-          technicalScope: { items: [] } as any,
-          commercialProposal: { totalValue: 50000, items: [] } as any,
-          deadline: '30 dias'
-        }
-      ];
+      return loadMockStore();
     }
     const { data, error } = await supabase
       .from(TABLE_NAME)
@@ -102,11 +134,53 @@ export const proposalService = {
   },
 
   async updateProposal(id: string, updates: Partial<Proposal>, revisionNote?: string): Promise<void> {
+    const buildRevisionEntry = (current: Proposal, nextRevision: string): ProposalRevision => ({
+      id: crypto.randomUUID(),
+      revisionNumber: nextRevision,
+      createdAt: new Date().toISOString(),
+      changes: revisionNote ?? '',
+      snapshot: {
+        clientName: current.clientName,
+        scopeTitle: current.scopeTitle,
+        status: current.status,
+        revision: current.revision,
+        validityDays: current.validityDays,
+        commercialProposal: current.commercialProposal,
+        technicalScope: current.technicalScope,
+        pricing: current.pricing,
+      },
+    });
+
     if (isMockMode) {
-      console.log('Mock Update:', id, updates);
+      const store = loadMockStore();
+      const idx = store.findIndex(p => p.id === id);
+      if (idx >= 0) {
+        const current = store[idx];
+        const nextRevisions = revisionNote
+          ? [...(current.revisions || []), buildRevisionEntry(current, updates.revision || current.revision)]
+          : current.revisions;
+        store[idx] = {
+          ...current,
+          ...updates,
+          revisions: nextRevisions,
+          updatedAt: new Date().toISOString(),
+        };
+        saveMockStore(store);
+      }
       return;
     }
-    let finalUpdates = mapToDb(updates);
+
+    let finalUpdates: any = mapToDb(updates);
+    if (revisionNote) {
+      const current = await this.getProposal(id);
+      if (current) {
+        const nextRevisions = [
+          ...(current.revisions || []),
+          buildRevisionEntry(current, updates.revision || current.revision),
+        ];
+        finalUpdates.revisions = nextRevisions;
+      }
+    }
     const { error } = await supabase
       .from(TABLE_NAME)
       .update(finalUpdates)
@@ -115,7 +189,10 @@ export const proposalService = {
   },
 
   async deleteProposal(id: string): Promise<void> {
-    if (isMockMode) return;
+    if (isMockMode) {
+      saveMockStore(loadMockStore().filter(p => p.id !== id));
+      return;
+    }
     const { error } = await supabase
       .from(TABLE_NAME)
       .delete()

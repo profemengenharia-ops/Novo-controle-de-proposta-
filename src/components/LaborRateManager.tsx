@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { LaborRate } from '../types';
 import { laborRateService } from '../services/laborRateService';
 import { formatCurrency, cn } from '../lib/utils';
+import { confirmAction } from '../hooks/useConfirm';
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
@@ -183,10 +184,20 @@ export function LaborRateManager() {
   useEffect(() => { load(); }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Excluir esta taxa de mão de obra?')) return;
-    await laborRateService.delete(id);
-    toast.success('Taxa removida.');
-    load();
+    const ok = await confirmAction({
+      title: 'Excluir esta taxa?',
+      description: 'A taxa será removida permanentemente.',
+      confirmLabel: 'Excluir',
+    });
+    if (!ok) return;
+    try {
+      await laborRateService.delete(id);
+      toast.success('Taxa removida.');
+      load();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao remover.');
+    }
   };
 
   const openEdit = (rate: LaborRate) => { setEditing(rate); setShowModal(true); };

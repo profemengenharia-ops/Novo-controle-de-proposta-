@@ -1,9 +1,8 @@
 import React from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { 
-  FileText, 
-  Package, 
-  BookOpen, 
+  FileText,
+  BookOpen,
   LayoutDashboard, 
   LogOut, 
   Menu, 
@@ -88,11 +87,11 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
         <div className="p-4 border-t border-white/10">
           <div className="flex items-center p-3">
             <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center overflow-hidden">
-               {user?.photoURL ? <img src={user.photoURL} alt="User" /> : <span className="text-xs uppercase">{user?.email?.charAt(0)}</span>}
+               <span className="text-xs uppercase">{user?.email?.charAt(0)}</span>
             </div>
             {isSidebarOpen && (
               <div className="ml-3 flex-1 overflow-hidden">
-                <p className="text-sm font-medium truncate">{user?.displayName || user?.email}</p>
+                <p className="text-sm font-medium truncate">{user?.email}</p>
                 <button onClick={() => logout()} className="text-[10px] uppercase tracking-wider text-white/50 hover:text-white flex items-center">
                   Sair <LogOut size={10} className="ml-1" />
                 </button>

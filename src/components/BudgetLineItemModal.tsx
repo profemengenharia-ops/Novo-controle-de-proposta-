@@ -31,7 +31,7 @@ const EMPTY_FORM = {
   notes: '',
 };
 
-export function AddBudgetItemModal({ onClose, onAdd, editingItem }: Props) {
+export function BudgetLineItemModal({ onClose, onAdd, editingItem }: Props) {
   const [tab, setTab] = useState<ModalTab>(editingItem ? 'manual' : 'manual');
   const [form, setForm] = useState({ ...EMPTY_FORM, ...(editingItem ?? {}) });
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
