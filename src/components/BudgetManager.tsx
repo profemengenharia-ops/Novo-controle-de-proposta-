@@ -28,7 +28,11 @@ import { toast } from 'sonner';
 
 type Tab = 'orcamentos' | 'catalogo' | 'mao_de_obra';
 
-export function BudgetManager() {
+interface BudgetManagerProps {
+  onNavigate?: (tab: string) => void;
+}
+
+export function BudgetManager({ onNavigate }: BudgetManagerProps) {
   const [activeTab, setActiveTab] = useState<Tab>('orcamentos');
   const [openProject, setOpenProject] = useState<BudgetProject | null>(null);
 
@@ -37,7 +41,7 @@ export function BudgetManager() {
   };
 
   if (openProject) {
-    return <BudgetEditor project={openProject} onBack={() => setOpenProject(null)} />;
+    return <BudgetEditor project={openProject} onBack={() => setOpenProject(null)} onNavigate={onNavigate} />;
   }
 
   return (

@@ -1,18 +1,19 @@
 import React from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { 
+import {
   FileText,
   BookOpen,
-  LayoutDashboard, 
-  LogOut, 
-  Menu, 
-  X, 
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  X,
   PlusCircle,
   Bell,
   Sparkles,
   FilePlus,
   ClipboardList,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  Briefcase,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -30,11 +31,12 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
 
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'proposals', label: 'Propostas', icon: FileText },
-    { id: 'estimates', label: 'Orçamentos', icon: ClipboardList },
-    { id: 'norms', label: 'Normas & Blocos', icon: BookOpen },
-    { id: 'reports', label: 'Relatórios', icon: PieChartIcon },
+    { id: 'dashboard',  label: 'Dashboard',        icon: LayoutDashboard },
+    { id: 'comercial',  label: 'Comercial',         icon: Briefcase },
+    { id: 'proposals',  label: 'Propostas',         icon: FileText },
+    { id: 'estimates',  label: 'Orçamentos',        icon: ClipboardList },
+    { id: 'norms',      label: 'Normas & Blocos',   icon: BookOpen },
+    { id: 'reports',    label: 'Relatórios',        icon: PieChartIcon },
   ];
 
   return (

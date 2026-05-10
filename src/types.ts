@@ -232,6 +232,8 @@ export interface BudgetProject {
   updatedAt: string;
   createdBy: string;
   linkedProposalId?: string;
+  originOpportunityId?: string;
+  requestedBy?: string;
 }
 
 export interface LaborRate {
@@ -286,6 +288,7 @@ export interface CRMOpportunity {
   stage: OpportunityStage;
   vendorId?: string;
   linkedProposalId?: string;
+  linkedBudgetId?: string;
   probability: number;
   expectedCloseDate?: string;
   activities: CRMActivity[];
