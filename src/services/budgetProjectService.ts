@@ -54,6 +54,8 @@ const mapFromDb = (row: any): BudgetProject => ({
   updatedAt: row.updated_at,
   createdBy: row.created_by,
   linkedProposalId: row.linked_proposal_id,
+  originOpportunityId: row.origin_opportunity_id,
+  requestedBy: row.requested_by,
 });
 
 const mapToDb = (p: Partial<BudgetProject>) => {
@@ -72,6 +74,8 @@ const mapToDb = (p: Partial<BudgetProject>) => {
   if (p.totalBDI !== undefined) data.total_bdi = p.totalBDI;
   if (p.finalPrice !== undefined) data.final_price = p.finalPrice;
   if (p.linkedProposalId !== undefined) data.linked_proposal_id = p.linkedProposalId;
+  if (p.originOpportunityId !== undefined) data.origin_opportunity_id = p.originOpportunityId;
+  if (p.requestedBy !== undefined) data.requested_by = p.requestedBy;
   if (p.createdBy !== undefined) data.created_by = p.createdBy;
   return data;
 };
@@ -138,16 +142,20 @@ export const budgetProjectService = {
   },
 
   async create(
-    fields: Pick<BudgetProject, 'title' | 'clientName' | 'address' | 'responsible' | 'notes'>,
+    fields: Pick<BudgetProject, 'title' | 'clientName' | 'address' | 'responsible' | 'notes'> & {
+      originOpportunityId?: string;
+      requestedBy?: string;
+    },
     userId: string,
   ): Promise<string> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     
     if (isMockMode) {
+      const { originOpportunityId, requestedBy, ...coreFields } = fields;
       const newProject: BudgetProject = {
         id,
-        ...fields,
+        ...coreFields,
         status: BudgetStatus.DRAFT,
         stages: [],
         indirectCosts: defaultIndirectCosts(),
@@ -159,6 +167,8 @@ export const budgetProjectService = {
         createdAt: now,
         updatedAt: now,
         createdBy: userId,
+        originOpportunityId,
+        requestedBy,
       };
       MOCK_STORE.push(newProject);
       persistMock(MOCK_STORE);

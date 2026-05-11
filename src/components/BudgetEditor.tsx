@@ -3,14 +3,16 @@ import {
   Plus, Trash2, ChevronDown, ChevronRight, Save, Check,
   Package, HardHat, Wrench, Truck, Edit2, GripVertical,
   AlertCircle, TrendingUp, Settings2, ChevronUp, Copy, ArrowUp, ArrowDown,
+  Briefcase, FileText,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import {
   BudgetProject, BudgetStatus, BudgetStage, BudgetLineItem,
-  BudgetLineType, BudgetBDI, BudgetIndirectCosts,
+  BudgetLineType, BudgetBDI, BudgetIndirectCosts, ProposalStatus,
 } from '../types';
 import { budgetProjectService } from '../services/budgetProjectService';
+import { proposalService } from '../services/proposalService';
 import { formatCurrency, cn, calculateBDI } from '../lib/utils';
 import { BudgetLineItemModal } from './BudgetLineItemModal';
 import { BudgetPrintView } from './BudgetPrintView';
@@ -95,9 +97,10 @@ function computeBDI(bdi: BudgetBDI): number {
 interface Props {
   project: BudgetProject;
   onBack: () => void;
+  onNavigate?: (tab: string) => void;
 }
 
-export function BudgetEditor({ project: initial, onBack }: Props) {
+export function BudgetEditor({ project: initial, onBack, onNavigate }: Props) {
   const [project, setProject] = useState<BudgetProject>(initial);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -272,6 +275,73 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
     }
   };
 
+  const [generatingProposal, setGeneratingProposal] = useState(false);
+
+  const handleGenerateProposal = async () => {
+    if (!onNavigate) return;
+    setGeneratingProposal(true);
+    try {
+      // Save first to ensure latest numbers
+      await budgetProjectService.update(project.id, {
+        ...project,
+        totalDirectCost,
+        totalIndirectCost,
+        totalBDI,
+        finalPrice,
+        bdi: { ...project.bdi, calculatedBDI: calculatedBDIPct },
+      });
+
+      const now = new Date().toISOString();
+      const newId = await proposalService.createProposal({
+        clientName: project.clientName,
+        proposalNumber: `ORC-${Date.now()}`,
+        revision: '0',
+        status: ProposalStatus.DRAFT,
+        validityDays: 30,
+        deadline: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+        createdBy: project.createdBy,
+        technicalScope: {
+          generalConsiderations: project.notes ?? '',
+          references: [],
+          norms: [],
+          items: [],
+          safetyNotes: '',
+          exclusions: [],
+          contractorObligations: [],
+          contracteeObligations: [],
+        },
+        commercialProposal: {
+          totalValue: finalPrice,
+          paymentTerms: '',
+          reajuste: '',
+          guarantee: '',
+          items: project.stages.flatMap(st =>
+            st.items.map(i => ({
+              id: i.id,
+              description: i.description,
+              quantity: i.quantity,
+              unit: i.unit,
+              unitPrice: i.unitCost,
+              totalPrice: i.totalCost,
+              source: 'engineering' as const,
+            }))
+          ),
+        },
+        scopeTitle: project.title,
+      });
+
+      // Link the proposal back to the budget
+      await budgetProjectService.update(project.id, { linkedProposalId: newId });
+      setDirty(false);
+      toast.success('Proposta criada com sucesso!');
+      onNavigate(`edit-${newId}`);
+    } catch {
+      toast.error('Erro ao gerar proposta.');
+    } finally {
+      setGeneratingProposal(false);
+    }
+  };
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -284,6 +354,19 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
         >
           ← Voltar aos Orçamentos
         </button>
+
+        {/* Origin banner */}
+        {project.originOpportunityId && (
+          <div className="flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+            <Briefcase size={14} className="text-violet-600 shrink-0" />
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-violet-700">Solicitado pelo Comercial</p>
+              {project.requestedBy && (
+                <p className="text-xs text-violet-600 opacity-70">Responsável: {project.requestedBy}</p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white rounded-2xl border border-black/5 shadow-sm p-6">
           <div className="space-y-1">
@@ -308,6 +391,19 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
               calculatedBDIPct={calculatedBDIPct}
               byType={byType}
             />
+
+            {project.status === BudgetStatus.APPROVED && onNavigate && (
+              <button
+                onClick={handleGenerateProposal}
+                disabled={generatingProposal}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-green-600 text-white text-xs font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg shadow-green-200 disabled:opacity-50"
+              >
+                {generatingProposal
+                  ? <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white" />
+                  : <FileText size={14} />}
+                {generatingProposal ? 'Gerando...' : 'Gerar Proposta'}
+              </button>
+            )}
 
             <button
               onClick={handleSave}

@@ -17,6 +17,7 @@ import { PublicProposalView } from './components/PublicProposalView';
 import { ManualProposalModal } from './components/ManualProposalModal';
 import { DailyBriefing } from './components/DailyBriefing';
 import { Reports } from './components/Reports';
+import { ComercialHub } from './components/ComercialHub';
 import { Proposal } from './types';
 import { proposalService } from './services/proposalService';
 import { LogIn } from 'lucide-react';
@@ -103,9 +104,10 @@ function AppContent() {
           <ManualProposalModal onClose={() => setActiveTab('dashboard')} onComplete={() => setActiveTab('proposals')} />
         </React.Fragment>
       );
-      case 'estimates': return <BudgetManager />;
-      case 'norms': return <NormsManager />;
-      case 'reports': return <Reports />;
+      case 'comercial':  return <ComercialHub onNavigate={setActiveTab} />;
+      case 'estimates':  return <BudgetManager onNavigate={setActiveTab} />;
+      case 'norms':      return <NormsManager />;
+      case 'reports': return <Reports onNavigate={setActiveTab} />;
       default: 
         if (activeTab.startsWith('edit-')) {
           return <ProposalWizard proposalId={activeTab.replace('edit-', '')} onComplete={() => setActiveTab('proposals')} />;
