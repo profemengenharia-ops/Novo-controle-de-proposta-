@@ -8,34 +8,17 @@ import {
   Check, Trash2, Edit2, TrendingUp, CheckCircle2, AlertCircle,
   BarChart3, Download, Clock, Briefcase, Building2, MapPin,
   UserPlus, Activity, DollarSign,
-  LayoutGrid, Target, ClipboardList, ExternalLink,
+  LayoutGrid, Target,
 } from 'lucide-react';
 import {
   Proposal, ProposalStatus, Vendor, CRMOpportunity, CRMClient,
-  OpportunityStage, ActivityType, CRMActivity, CRMTask, BudgetProject, BudgetStatus,
+  OpportunityStage, ActivityType, CRMActivity, CRMTask,
 } from '../types';
 import { formatCurrency, cn, formatDate } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { proposalService } from '../services/proposalService';
 import { crmService } from '../services/crmService';
-import { budgetProjectService } from '../services/budgetProjectService';
 import { toast } from 'sonner';
-
-const BUDGET_STATUS_LABEL: Record<BudgetStatus, string> = {
-  [BudgetStatus.DRAFT]: 'Em Elaboração',
-  [BudgetStatus.APPROVED]: 'Aprovado — Pronto',
-  [BudgetStatus.EXECUTING]: 'Em Execução',
-  [BudgetStatus.COMPLETED]: 'Concluído',
-  [BudgetStatus.CANCELLED]: 'Cancelado',
-};
-
-const BUDGET_STATUS_COLOR: Record<BudgetStatus, string> = {
-  [BudgetStatus.DRAFT]: 'bg-amber-50 text-amber-700',
-  [BudgetStatus.APPROVED]: 'bg-green-50 text-green-700',
-  [BudgetStatus.EXECUTING]: 'bg-blue-50 text-blue-700',
-  [BudgetStatus.COMPLETED]: 'bg-neutral-100 text-neutral-600',
-  [BudgetStatus.CANCELLED]: 'bg-red-50 text-red-500',
-};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -337,11 +320,10 @@ interface OpportunityModalProps {
   createdBy: string;
   onClose: () => void;
   onSave: () => void;
-  onNavigate?: (tab: string) => void;
 }
 
 function OpportunityModal({
-  opportunity, vendors, clients, defaultStage, createdBy, onClose, onSave, onNavigate,
+  opportunity, vendors, clients, defaultStage, createdBy, onClose, onSave,
 }: OpportunityModalProps) {
   const [tab, setTab] = useState<OppModalTab>('info');
   const [saving, setSaving] = useState(false);
@@ -483,47 +465,6 @@ function OpportunityModal({
     onSave();
   };
 
-  const [linkedBudget, setLinkedBudget] = useState<BudgetProject | null>(null);
-  const [requestingBudget, setRequestingBudget] = useState(false);
-
-  useEffect(() => {
-    if (localOpp?.linkedBudgetId) {
-      budgetProjectService.getById(localOpp.linkedBudgetId).then(setLinkedBudget);
-    } else {
-      setLinkedBudget(null);
-    }
-  }, [localOpp?.linkedBudgetId]);
-
-  const handleRequestBudget = async () => {
-    if (!localOpp) return;
-    setRequestingBudget(true);
-    try {
-      const vendorName = vendors.find(v => v.id === localOpp.vendorId)?.name ?? createdBy;
-      const newBudgetId = await budgetProjectService.create(
-        {
-          title: localOpp.title,
-          clientName: localOpp.clientName,
-          address: '',
-          responsible: '',
-          notes: `Solicitação de orçamento proveniente do CRM.\nResponsável comercial: ${vendorName}`,
-          originOpportunityId: localOpp.id,
-          requestedBy: vendorName,
-        },
-        createdBy,
-      );
-      await crmService.updateOpportunity(localOpp.id, { linkedBudgetId: newBudgetId });
-      const budget = await budgetProjectService.getById(newBudgetId);
-      setLinkedBudget(budget);
-      await refreshLocal();
-      onSave();
-      toast.success('Solicitação de orçamento enviada');
-    } catch {
-      toast.error('Erro ao solicitar orçamento');
-    } finally {
-      setRequestingBudget(false);
-    }
-  };
-
   const pendingTasks = (localOpp?.tasks ?? []).filter(t => !t.completed).length;
   const actCount = (localOpp?.activities ?? []).length;
 
@@ -633,61 +574,6 @@ function OpportunityModal({
                 <textarea value={form.notes} onChange={setF('notes')} rows={3}
                   className="w-full border border-neutral-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-black/5 focus:border-neutral-400 resize-none" />
               </div>
-
-              {/* ── Budget Request Section (existing opportunities only) ─────── */}
-              {opportunity && (
-                <div className="border border-neutral-200 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <ClipboardList size={14} className="text-neutral-500" />
-                    <p className="text-[10px] font-black uppercase tracking-widest text-neutral-700">Orçamento Técnico</p>
-                  </div>
-
-                  {linkedBudget ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3 bg-neutral-50 rounded-xl px-3 py-2.5">
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-neutral-800 truncate">{linkedBudget.title}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={cn('inline-flex px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest', BUDGET_STATUS_COLOR[linkedBudget.status])}>
-                              {BUDGET_STATUS_LABEL[linkedBudget.status]}
-                            </span>
-                            {linkedBudget.finalPrice > 0 && (
-                              <span className="text-[10px] text-neutral-500 font-bold">{formatCurrency(linkedBudget.finalPrice)}</span>
-                            )}
-                          </div>
-                        </div>
-                        {onNavigate && (
-                          <button
-                            onClick={() => { onNavigate('estimates'); onClose(); }}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-neutral-800 shrink-0"
-                          >
-                            <ExternalLink size={11} />
-                            Ver
-                          </button>
-                        )}
-                      </div>
-                      {linkedBudget.status === BudgetStatus.APPROVED && (
-                        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
-                          <CheckCircle2 size={14} className="text-green-600 shrink-0" />
-                          <p className="text-[10px] font-black uppercase tracking-widest text-green-700">Pronto para proposta</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-xs text-neutral-400">Nenhum orçamento vinculado. Solicite para a equipe técnica elaborar.</p>
-                      <button
-                        onClick={handleRequestBudget}
-                        disabled={requestingBudget}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-orange-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-orange-600 disabled:opacity-50 transition-colors"
-                      >
-                        <Send size={12} />
-                        {requestingBudget ? 'Enviando…' : 'Solicitar Orçamento'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
 
               <div className="flex gap-3 pt-2">
                 <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-neutral-200 text-xs font-black uppercase tracking-widest hover:bg-neutral-50">
@@ -1046,8 +932,8 @@ function DashboardTab({
 // ─── Funnel Tab (Kanban) ──────────────────────────────────────────────────────
 
 function FunnelTab({
-  opportunities, vendors, onUpdate, onNavigate,
-}: { opportunities: CRMOpportunity[]; vendors: Vendor[]; onUpdate: () => void; onNavigate?: (tab: string) => void }) {
+  opportunities, vendors, onUpdate,
+}: { opportunities: CRMOpportunity[]; vendors: Vendor[]; onUpdate: () => void }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<OpportunityStage | null>(null);
   const [selectedOpp, setSelectedOpp] = useState<CRMOpportunity | null>(null);
@@ -1225,7 +1111,6 @@ function FunnelTab({
             vendors={vendors}
             clients={clients}
             createdBy={selectedOpp.createdBy}
-            onNavigate={onNavigate}
             onClose={() => setSelectedOpp(null)}
             onSave={() => { onUpdate(); setSelectedOpp(null); }}
           />
@@ -1236,7 +1121,6 @@ function FunnelTab({
             vendors={vendors}
             clients={clients}
             createdBy="user"
-            onNavigate={onNavigate}
             onClose={() => setNewOppStage(null)}
             onSave={() => { onUpdate(); setNewOppStage(null); }}
           />
@@ -1734,7 +1618,7 @@ function CRMHeader({
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export function Reports({ onNavigate }: { onNavigate?: (tab: string) => void } = {}) {
+export function Reports() {
   const [activeTab, setActiveTab] = useState<CRMTab>('dashboard');
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [opportunities, setOpportunities] = useState<CRMOpportunity[]>([]);
@@ -1773,7 +1657,7 @@ export function Reports({ onNavigate }: { onNavigate?: (tab: string) => void } =
       <CRMHeader activeTab={activeTab} onTabChange={setActiveTab} opportunityCount={activeOpps} />
       <div className="p-4 md:p-6">
         {activeTab === 'dashboard'  && <DashboardTab  proposals={proposals} opportunities={opportunities} vendors={vendors} />}
-        {activeTab === 'funnel'     && <FunnelTab      opportunities={opportunities} vendors={vendors} onUpdate={reload} onNavigate={onNavigate} />}
+        {activeTab === 'funnel'     && <FunnelTab      opportunities={opportunities} vendors={vendors} onUpdate={reload} />}
         {activeTab === 'clients'    && <ClientsTab     clients={clients} opportunities={opportunities} proposals={proposals} onUpdate={reload} />}
         {activeTab === 'activities' && <ActivitiesTab  opportunities={opportunities} vendors={vendors} onUpdate={reload} />}
         {activeTab === 'vendors'    && <VendorsTab     vendors={vendors} opportunities={opportunities} onUpdate={reload} />}
