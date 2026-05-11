@@ -27,6 +27,15 @@ serve(async (req) => {
     if (error || !proposal) throw new Error('Proposta não encontrada')
 
     // 2. Generate HTML Template (simplified)
+    const items = Array.isArray(proposal.technical_scope?.items) ? proposal.technical_scope.items : []
+    const itemsHtml = items.map((it: any) => `
+              <div class="item">
+                <strong>${it.category}</strong>: ${it.description}
+              </div>
+            `).join('')
+
+    const totalValue = proposal.commercial_proposal?.totalValue ?? 0
+
     const html = `
       <html>
         <head>
@@ -47,18 +56,14 @@ serve(async (req) => {
           </div>
           <div class="section">
             <h2>Cliente: ${proposal.client_name}</h2>
-            <p>Data: ${new Date(proposal.created_at).toLocaleDateString('pt-BR')}</p>
+            <p>Data: ${proposal.created_at ? new Date(proposal.created_at).toLocaleDateString('pt-BR') : ''}</p>
           </div>
           <div class="section">
             <h3>Escopo Técnico</h3>
-            ${proposal.technical_scope?.items?.map((it: any) => `
-              <div class="item">
-                <strong>${it.category}</strong>: ${it.description}
-              </div>
-            `).join('')}
+            ${itemsHtml}
           </div>
           <div class="total">
-            Valor Total: R$ ${proposal.commercial_proposal?.totalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            Valor Total: R$ ${Number(totalValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </div>
         </body>
       </html>

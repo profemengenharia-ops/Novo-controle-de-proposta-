@@ -42,10 +42,14 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const { proposal_id, survey_data, target_margin = 0.25 } = await req.json()
+    const body = await req.json().catch(() => ({}))
+    const { proposal_id, survey_data, target_margin = 0.25 } = body || {}
+
+    if (!proposal_id) throw new Error('Missing proposal_id')
+    if (!survey_data) throw new Error('Missing survey_data')
 
     // --- FUNÇÃO DE TENTATIVA COM BACKOFF ---
-    const getAiCalculation = async (data: any, retries = 3, delay = 52000) => {
+    const getAiCalculation = async (data: any, retries = 3, delay = 5000) => {
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${Deno.env.get('GEMINI_API_KEY')}`, {
           method: 'POST',
@@ -57,7 +61,7 @@ serve(async (req) => {
               }]
             }],
             generationConfig: {
-              responseMimeType: "application/json" // Força o Gemini a responder em JSON
+              responseMimeType: "application/json"
             }
           })
         })
@@ -65,26 +69,47 @@ serve(async (req) => {
         if (response.status === 503 && retries > 0) {
           console.log(`[503] Capacidade esgotada. Tentando novamente em ${delay/1000}s...`)
           await new Promise(resolve => setTimeout(resolve, delay))
-          return getAiCalculation(data, retries - 1, delay * 1.5)
+          return getAiCalculation(data, retries - 1, Math.round(delay * 1.5))
         }
 
         if (!response.ok) {
           const errText = await response.text();
           throw new Error(`Falha na API Gemini (${response.status}): ${errText}`);
         }
-        
+
         const jsonResponse = await response.json();
-        // Extrai o conteúdo JSON do formato de resposta do Gemini
-        const content = jsonResponse.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!content) throw new Error('Resposta vazia da IA');
-        
-        return JSON.parse(content);
-      } catch (err) {
-        if (retries === 0) {
-          console.error('[ERRO] Esgotadas tentativas de IA:', err);
-          return null;
+        // Tenta extrair conteúdo JSON por caminhos conhecidos (variações da API)
+        let content: string | undefined
+        content = jsonResponse?.candidates?.[0]?.content?.parts?.[0]?.text
+          || jsonResponse?.output?.[0]?.content?.[0]?.text
+          || jsonResponse?.candidates?.[0]?.message?.content?.[0]?.text
+          || jsonResponse?.result?.output?.[0]?.content?.[0]?.text
+
+        if (!content) {
+          // última tentativa: serializar o objeto retornado inteiro como string
+          const asText = JSON.stringify(jsonResponse)
+          const maybeMatch = asText.match(/\{[\s\S]*\}/)
+          if (maybeMatch) content = maybeMatch[0]
         }
-        throw err;
+
+        if (!content) throw new Error('Resposta vazia da IA')
+
+        // Parse seguro do JSON — tenta extrair JSON de dentro de texto livre se necessário
+        try {
+          return JSON.parse(content)
+        } catch (e) {
+          const match = content.match(/\{[\s\S]*\}/)
+          if (match) return JSON.parse(match[0])
+          throw new Error('Falha ao parsear JSON retornado pela IA')
+        }
+      } catch (err) {
+        if (retries > 0) {
+          console.warn('[AI] Erro temporário, tentando novamente:', err.message || err)
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          return getAiCalculation(data, retries - 1, Math.round(delay * 1.5))
+        }
+        console.error('[ERRO] Esgotadas tentativas de IA:', err)
+        return null
       }
     }
 
