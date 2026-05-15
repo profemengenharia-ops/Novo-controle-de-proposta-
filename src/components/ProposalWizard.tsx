@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Proposal, ProposalStatus, TechnicalScopeItem } from '../types';
+import { Proposal, ProposalStatus, TechnicalScopeItem, Client, Obra, ObraStatus } from '../types';
 import { proposalService } from '../services/proposalService';
+import { clientService } from '../services/clientService';
+import { obraService } from '../services/obraService';
 import { aiService } from '../services/aiService';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'sonner';
 
-import { 
-  Check, 
-  ChevronRight, 
-  ChevronLeft, 
-  Sparkles, 
-  Trash2, 
-  Plus, 
-  Save, 
+import {
+  Check,
+  ChevronRight,
+  ChevronLeft,
+  Sparkles,
+  Trash2,
+  Plus,
+  Save,
   AlertCircle,
   FileSpreadsheet,
   PackageSearch,
@@ -21,7 +23,12 @@ import {
   TrendingUp,
   Search,
   Upload,
-  ArrowRight
+  ArrowRight,
+  Building2,
+  HardHat,
+  MapPin,
+  Ruler,
+  Phone,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
@@ -37,10 +44,12 @@ import { BudgetProject } from '../types';
 
 interface WizardProps {
   proposalId?: string;
+  /** Pre-link to an obra without an existing proposal (from PropostasInbox) */
+  initialObraId?: string;
   onComplete: () => void;
 }
 
-export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
+export function ProposalWizard({ proposalId, initialObraId, onComplete }: WizardProps) {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -50,6 +59,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [revisionNote, setRevisionNote] = useState('');
   const [selectedItemForPricing, setSelectedItemForPricing] = useState<{index: number, item: CommercialItem} | null>(null);
   const [showBudgetSelector, setShowBudgetSelector] = useState(false);
+  const [linkedClient, setLinkedClient] = useState<Client | null>(null);
+  const [linkedObra, setLinkedObra] = useState<Obra | null>(null);
   
   const [proposal, setProposal] = useState<Partial<Proposal>>({
     clientName: '',
@@ -89,8 +100,43 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       async function load() {
         const data = await proposalService.getProposal(proposalId!);
         if (data) {
+          // Build pre-fill overrides for empty fields
+          const preFill: Partial<Proposal> = {};
+
+          // Fetch linked client and obra in parallel
+          const [client, obra] = await Promise.all([
+            data.clientId ? clientService.getById(data.clientId).catch(() => null) : null,
+            data.obraId   ? obraService.getById(data.obraId).catch(() => null)   : null,
+          ]);
+
+          if (client) {
+            setLinkedClient(client);
+            if (!data.clientName) preFill.clientName = client.companyName;
+          }
+          if (obra) {
+            setLinkedObra(obra);
+            if (!data.scopeTitle)  preFill.scopeTitle = obra.name;
+            if (!data.deadline && obra.deadline) preFill.deadline = obra.deadline;
+            if (obra.scopeSummary && !data.technicalScope?.generalConsiderations) {
+              preFill.technicalScope = {
+                ...(data.technicalScope ?? {
+                  generalConsiderations: '',
+                  references: [],
+                  norms: [],
+                  items: [],
+                  safetyNotes: '',
+                  exclusions: [],
+                  contractorObligations: [],
+                  contracteeObligations: [],
+                }),
+                generalConsiderations: obra.scopeSummary,
+              };
+            }
+          }
+
           setProposal({
             ...data,
+            ...preFill,
             contractDetails: data.contractDetails || {
               contractNumber: '',
               signingDate: '',
@@ -119,6 +165,46 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       return () => unsubscribe();
     }
   }, [proposalId]);
+
+  // ── Pre-fill from obra (Inbox "Assumir" flow) ─────────────────────────────
+  useEffect(() => {
+    if (!initialObraId || proposalId) return; // editing an existing proposal takes priority
+    async function loadFromObra() {
+      const obra = await obraService.getById(initialObraId!).catch(() => null);
+      if (!obra) return;
+      setLinkedObra(obra);
+      const client = obra.clientId
+        ? await clientService.getById(obra.clientId).catch(() => null)
+        : null;
+      if (client) setLinkedClient(client);
+      setProposal(prev => ({
+        ...prev,
+        obraId: obra.id,
+        clientId: obra.clientId,
+        clientName: client?.companyName ?? prev.clientName ?? '',
+        scopeTitle: obra.name,
+        ...(obra.deadline ? { deadline: obra.deadline } : {}),
+        ...(obra.scopeSummary
+          ? {
+              technicalScope: {
+                ...(prev.technicalScope ?? {
+                  generalConsiderations: '',
+                  references: [],
+                  norms: [],
+                  items: [],
+                  safetyNotes: '',
+                  exclusions: [],
+                  contractorObligations: [],
+                  contracteeObligations: [],
+                }),
+                generalConsiderations: obra.scopeSummary,
+              },
+            }
+          : {}),
+      }));
+    }
+    loadFromObra();
+  }, [initialObraId, proposalId]);
 
   const handleSave = async () => {
     if (!proposal.clientName?.trim()) {
@@ -159,6 +245,26 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
         });
       }
       toast.success(proposal.id ? 'Proposta atualizada com sucesso!' : 'Proposta criada com sucesso!');
+
+      // ── Auto-avançar obra vinculada para "Em Proposta" no Kanban ──────────────
+      const obraId = proposal.obraId ?? linkedObra?.id;
+      if (obraId) {
+        try {
+          const ADVANCE_FROM: ObraStatus[] = [
+            'prospeccao', 'aguardando_orcamento', 'em_orcamento', 'orcada',
+          ];
+          const currentObra = linkedObra ?? await obraService.getById(obraId).catch(() => null);
+          if (currentObra && ADVANCE_FROM.includes(currentObra.status)) {
+            await obraService.update(obraId, { status: 'em_proposta' });
+            // Update local reference so stale status isn't used again in this session
+            setLinkedObra(prev => prev ? { ...prev, status: 'em_proposta' } : prev);
+          }
+        } catch (obraErr) {
+          // Non-fatal — proposal saved OK, status update failed silently
+          console.warn('Falha ao avançar status da obra:', obraErr);
+        }
+      }
+
       onComplete();
     } catch (e) {
       console.error(e);
@@ -168,20 +274,84 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   };
 
   const [pricingInsight, setPricingInsight] = useState<string | null>(null);
+  const [summaryView, setSummaryView] = useState(false);
+  const [allClients, setAllClients] = useState<Client[]>([]);
+  const [clientQuery, setClientQuery] = useState('');
+  const [clientDropOpen, setClientDropOpen] = useState(false);
+  const [clientObras, setClientObras] = useState<Obra[]>([]);
+
+  // Sync summaryView from loaded proposal
+  useEffect(() => {
+    if (proposal.commercialProposal?.hideItemDetails !== undefined) {
+      setSummaryView(proposal.commercialProposal.hideItemDetails);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposalId]);
+
+  useEffect(() => {
+    clientService.getAll().then(setAllClients).catch(() => {});
+  }, []);
+
+  const handleSelectClient = async (client: Client) => {
+    setLinkedClient(client);
+    setClientQuery(client.companyName);
+    setClientDropOpen(false);
+    setProposal(prev => ({ ...prev, clientName: client.companyName, clientId: client.id }));
+    try {
+      const all = await obraService.getAll();
+      setClientObras(all.filter(o => o.clientId === client.id));
+    } catch {
+      setClientObras([]);
+    }
+  };
+
+  const handleSelectObra = (obra: Obra) => {
+    setLinkedObra(obra);
+    setProposal(prev => ({
+      ...prev,
+      obraId: obra.id,
+      scopeTitle: prev.scopeTitle || obra.name,
+      ...((!prev.deadline && obra.deadline) ? { deadline: obra.deadline } : {}),
+      technicalScope: {
+        generalConsiderations: '',
+        references: [],
+        norms: [],
+        items: [],
+        safetyNotes: '',
+        exclusions: [],
+        contractorObligations: [],
+        contracteeObligations: [],
+        ...(prev.technicalScope ?? {}),
+        ...(!prev.technicalScope?.generalConsiderations && obra.scopeSummary
+          ? { generalConsiderations: obra.scopeSummary }
+          : {}),
+      },
+    }));
+  };
 
   const handleAiGenerateText = async (prompt: string) => {
     if (!prompt.trim()) return;
     setAiLoading(true);
-    const items = await aiService.generateTechnicalScope(prompt);
-    setProposal(prev => ({
-      ...prev,
-      technicalScope: {
-        ...prev.technicalScope!,
-        items: [...(prev.technicalScope?.items || []), ...items]
+    try {
+      const items = await aiService.generateTechnicalScope(prompt);
+      if (items && items.length > 0) {
+        setProposal(prev => ({
+          ...prev,
+          technicalScope: {
+            ...prev.technicalScope!,
+            items: [...(prev.technicalScope?.items || []), ...items]
+          }
+        }));
+        toast.success(`${items.length} ${items.length === 1 ? 'item gerado' : 'itens gerados'} pela IA!`);
+        setAiPrompt('');
+      } else if (items !== null) {
+        toast.warning('A IA não retornou itens. Tente descrever o projeto com mais detalhes.');
       }
-    }));
-    setAiPrompt('');
-    setAiLoading(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const analyzeRisk = async () => {
@@ -265,8 +435,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     { title: 'Referências', icon: 2 },
     { title: 'Técnico', icon: 3 },
     { title: 'Comercial', icon: 4 },
-    { title: 'Preço', icon: 5 },
-    { title: 'Workbench', icon: 6 },
+    { title: 'Workbench', icon: 5 },
   ];
 
   const updateTechnical = (key: keyof Proposal['technicalScope'], value: any) => {
@@ -370,6 +539,69 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                       exit={{ opacity: 0, x: -20 }}
                       className="space-y-6 flex-1"
                     >
+                      {/* ── Linked Context Card ─────────────────────────────────── */}
+                      {(linkedClient || linkedObra) && (
+                        <div className="flex gap-0 rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50/60 overflow-hidden">
+                          {linkedClient && (
+                            <div className="flex-1 p-4 space-y-1">
+                              <p className="text-[9px] font-black uppercase tracking-widest text-blue-500 flex items-center gap-1 mb-2">
+                                <Building2 size={9} /> Cliente Vinculado
+                              </p>
+                              <p className="text-sm font-black text-blue-900 leading-tight">{linkedClient.companyName}</p>
+                              {linkedClient.tradeName && (
+                                <p className="text-[10px] text-blue-600 font-medium">{linkedClient.tradeName}</p>
+                              )}
+                              {linkedClient.cnpj && (
+                                <p className="text-[10px] text-blue-500 font-mono">{linkedClient.cnpj}</p>
+                              )}
+                              {linkedClient.contacts.length > 0 && (() => {
+                                const ct = linkedClient.contacts.find(c => c.isPrimary) ?? linkedClient.contacts[0];
+                                return (
+                                  <p className="text-[10px] text-blue-600 font-medium flex items-center gap-1">
+                                    <Phone size={9} />
+                                    {ct.name}{ct.phone ? ` · ${ct.phone}` : ''}
+                                  </p>
+                                );
+                              })()}
+                              {(linkedClient.city || linkedClient.state) && (
+                                <p className="text-[10px] text-blue-500 flex items-center gap-1">
+                                  <MapPin size={9} />
+                                  {[linkedClient.city, linkedClient.state].filter(Boolean).join(' · ')}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                          {linkedObra && (
+                            <div className={`flex-1 p-4 space-y-1 ${linkedClient ? 'border-l border-blue-200' : ''}`}>
+                              <p className="text-[9px] font-black uppercase tracking-widest text-indigo-500 flex items-center gap-1 mb-2">
+                                <HardHat size={9} /> Obra Vinculada
+                              </p>
+                              <p className="text-sm font-black text-indigo-900 leading-tight">{linkedObra.name}</p>
+                              {linkedObra.type && (
+                                <p className="text-[10px] text-indigo-600 font-medium capitalize">{linkedObra.type}</p>
+                              )}
+                              {linkedObra.estimatedArea && (
+                                <p className="text-[10px] text-indigo-500 flex items-center gap-1">
+                                  <Ruler size={9} /> {linkedObra.estimatedArea} m²
+                                </p>
+                              )}
+                              {(linkedObra.city || linkedObra.state) && (
+                                <p className="text-[10px] text-indigo-500 flex items-center gap-1">
+                                  <MapPin size={9} />
+                                  {[linkedObra.city, linkedObra.state].filter(Boolean).join(' · ')}
+                                </p>
+                              )}
+                              {linkedObra.deadline && (
+                                <p className="text-[10px] text-indigo-400 font-medium">
+                                  Prazo: {linkedObra.deadline}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {/* ─────────────────────────────────────────────────────────── */}
+
                       <div className="grid grid-cols-2 gap-6">
                         <div className="space-y-2 col-span-2">
                           <label className="text-xs font-bold uppercase tracking-widest opacity-40">Escopo da Proposta (Título)</label>
@@ -381,15 +613,86 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                             className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-bold text-lg"
                           />
                         </div>
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Cliente / Empresa</label>
-                          <input 
-                            type="text" 
-                            value={proposal.clientName}
-                            onChange={e => setProposal({...proposal, clientName: e.target.value})}
-                            placeholder="Ex: FRACAZA ADMINISTRACAO..."
-                            className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-medium"
-                          />
+                        <div className="space-y-2 col-span-2">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40 flex items-center gap-1.5">
+                            <Building2 size={11} /> Cliente / Empresa
+                          </label>
+                          {/* Search bar */}
+                          <div className="relative">
+                            <Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-black/30 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={clientQuery || proposal.clientName || ''}
+                              onChange={e => {
+                                const q = e.target.value;
+                                setClientQuery(q);
+                                setProposal(prev => ({ ...prev, clientName: q }));
+                                setClientDropOpen(q.length > 0);
+                                if (!q) { setLinkedClient(null); setClientObras([]); }
+                              }}
+                              onFocus={() => { if ((clientQuery || proposal.clientName || '').length > 0) setClientDropOpen(true); }}
+                              placeholder="Buscar cliente cadastrado ou digitar manualmente..."
+                              className="w-full pl-10 pr-4 p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-medium"
+                            />
+                            {/* Dropdown */}
+                            {clientDropOpen && (() => {
+                              const q = (clientQuery || proposal.clientName || '').toLowerCase();
+                              const filtered = allClients.filter(c =>
+                                c.companyName.toLowerCase().includes(q) ||
+                                (c.tradeName ?? '').toLowerCase().includes(q)
+                              ).slice(0, 6);
+                              if (filtered.length === 0) return null;
+                              return (
+                                <div className="absolute top-full mt-1 left-0 right-0 bg-white border border-black/10 rounded-2xl shadow-xl z-50 overflow-hidden">
+                                  {filtered.map(c => (
+                                    <button
+                                      key={c.id}
+                                      type="button"
+                                      onClick={() => handleSelectClient(c)}
+                                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-orange-50 text-left transition-colors border-b border-black/5 last:border-0"
+                                    >
+                                      <div className="w-8 h-8 rounded-xl bg-black/5 flex items-center justify-center shrink-0 text-[10px] font-black">
+                                        {c.companyName.charAt(0)}
+                                      </div>
+                                      <div>
+                                        <p className="text-sm font-bold">{c.companyName}</p>
+                                        {c.tradeName && <p className="text-[10px] opacity-50">{c.tradeName}</p>}
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </div>
+
+                          {/* Obras do cliente selecionado */}
+                          {linkedClient && clientObras.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-[9px] font-black uppercase tracking-widest opacity-40 mb-2 flex items-center gap-1">
+                                <HardHat size={9} /> Obras de {linkedClient.companyName}
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {clientObras.map(obra => (
+                                  <button
+                                    key={obra.id}
+                                    type="button"
+                                    onClick={() => handleSelectObra(obra)}
+                                    className={cn(
+                                      'px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all',
+                                      linkedObra?.id === obra.id
+                                        ? 'bg-orange-500 text-white border-orange-500'
+                                        : 'bg-white border-black/10 text-black/60 hover:border-orange-400 hover:text-orange-600'
+                                    )}
+                                  >
+                                    {obra.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {linkedClient && clientObras.length === 0 && (
+                            <p className="text-[10px] opacity-40 italic mt-1">Nenhuma obra cadastrada para este cliente.</p>
+                          )}
                         </div>
                         <div className="space-y-2">
                            <label className="text-xs font-bold uppercase tracking-widest opacity-40">Número da Proposta</label>
@@ -575,6 +878,90 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                           ))}
                         </div>
                       </div>
+
+                      {/* Obrigação da Contratada */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Obrigação da Contratada</label>
+                          <button
+                            type="button"
+                            onClick={() => updateTechnical('contractorObligations', [...(proposal.technicalScope?.contractorObligations || []), ''])}
+                            className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center gap-1"
+                          >
+                            <Plus size={13} /> Adicionar
+                          </button>
+                        </div>
+                        <div className="space-y-2 border border-black/8 rounded-2xl p-4 bg-black/[0.015]">
+                          {(proposal.technicalScope?.contractorObligations || []).length === 0 && (
+                            <p className="text-xs opacity-30 italic">Nenhuma obrigação listada. Clique em Adicionar.</p>
+                          )}
+                          {(proposal.technicalScope?.contractorObligations || []).map((obl, i) => (
+                            <div key={i} className="flex items-start gap-2 group">
+                              <span className="mt-3 text-[var(--color-brand-primary)] shrink-0 text-xs font-black">◆</span>
+                              <input
+                                type="text"
+                                value={obl}
+                                onChange={e => {
+                                  const next = [...(proposal.technicalScope?.contractorObligations || [])];
+                                  next[i] = e.target.value;
+                                  updateTechnical('contractorObligations', next);
+                                }}
+                                placeholder="Descrever obrigação da contratada..."
+                                className="flex-1 p-2.5 rounded-xl bg-white border border-black/8 text-sm focus:ring-1 focus:ring-[var(--color-brand-primary)] focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updateTechnical('contractorObligations', (proposal.technicalScope?.contractorObligations || []).filter((_, idx) => idx !== i))}
+                                className="mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Trash2 size={14} className="text-red-400" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Obrigação da Contratante */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Obrigação da Contratante</label>
+                          <button
+                            type="button"
+                            onClick={() => updateTechnical('contracteeObligations', [...(proposal.technicalScope?.contracteeObligations || []), ''])}
+                            className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center gap-1"
+                          >
+                            <Plus size={13} /> Adicionar
+                          </button>
+                        </div>
+                        <div className="space-y-2 border border-black/8 rounded-2xl p-4 bg-black/[0.015]">
+                          {(proposal.technicalScope?.contracteeObligations || []).length === 0 && (
+                            <p className="text-xs opacity-30 italic">Nenhuma obrigação listada. Clique em Adicionar.</p>
+                          )}
+                          {(proposal.technicalScope?.contracteeObligations || []).map((obl, i) => (
+                            <div key={i} className="flex items-start gap-2 group">
+                              <span className="mt-3 text-blue-500 shrink-0 text-xs font-black">◆</span>
+                              <input
+                                type="text"
+                                value={obl}
+                                onChange={e => {
+                                  const next = [...(proposal.technicalScope?.contracteeObligations || [])];
+                                  next[i] = e.target.value;
+                                  updateTechnical('contracteeObligations', next);
+                                }}
+                                placeholder="Descrever obrigação da contratante..."
+                                className="flex-1 p-2.5 rounded-xl bg-white border border-black/8 text-sm focus:ring-1 focus:ring-[var(--color-brand-primary)] focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updateTechnical('contracteeObligations', (proposal.technicalScope?.contracteeObligations || []).filter((_, idx) => idx !== i))}
+                                className="mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Trash2 size={14} className="text-red-400" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </motion.div>
                   )}
 
@@ -723,104 +1110,137 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                             </div>
                          </div>
 
-                         <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-                            <table className="w-full text-left text-sm">
-                              <thead className="text-[10px] uppercase opacity-40 font-bold border-b border-black/5">
-                                <tr>
-                                  <th className="px-4 py-3">Descrição</th>
-                                  <th className="px-4 py-3 w-20 text-center">Quant.</th>
-                                  <th className="px-4 py-3 w-24 text-right">Unitário</th>
-                                  <th className="px-4 py-3 w-32 text-right">Total</th>
-                                  <th className="px-4 py-3 w-20 text-center">Ações</th>
-                                  <th className="px-4 py-3 w-10"></th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-black/5">
-                                {proposal.commercialProposal?.items?.map((item, i) => (
-                                  <tr key={i} className="group">
-                                    <td className="px-4 py-2">
-                                      <input 
-                                        id={`pw-item-${item.id}`}
-                                        type="text" 
-                                        value={item.description}
-                                        onChange={e => {
-                                          const next = proposal.commercialProposal!.items.map((it, idx) => 
-                                            idx === i ? { ...it, description: e.target.value } : it
-                                          );
-                                          updateCommercial('items', next);
-                                        }}
-                                        className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
-                                        placeholder="Descrição do item ou serviço..."
-                                      />
-                                    </td>
-                                    <td className="px-4 py-2">
-                                      <input 
-                                        type="number" 
-                                        step="any"
-                                        min="0"
-                                        value={item.quantity === 0 ? '' : item.quantity}
-                                        onChange={e => {
-                                          const qty = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                          const next = proposal.commercialProposal!.items.map((it, idx) => {
-                                            if (idx === i) {
-                                              return { ...it, quantity: qty, totalPrice: qty * (it.unitPrice || 0) };
-                                            }
-                                            return it;
-                                          });
-                                          updateCommercial('items', next);
-                                        }}
-                                        className="w-full bg-transparent border-none focus:ring-0 p-0 text-center text-sm"
-                                      />
-                                    </td>
-                                    <td className="px-4 py-2">
-                                      <input 
-                                        type="number" 
-                                        step="0.01"
-                                        min="0"
-                                        value={item.unitPrice === 0 ? '' : item.unitPrice}
-                                        onChange={e => {
-                                          const price = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                          const next = proposal.commercialProposal!.items.map((it, idx) => {
-                                            if (idx === i) {
-                                              return { ...it, unitPrice: price, totalPrice: (it.quantity || 0) * price };
-                                            }
-                                            return it;
-                                          });
-                                          updateCommercial('items', next);
-                                        }}
-                                        className="w-full bg-transparent border-none focus:ring-0 p-0 text-right text-sm font-mono"
-                                      />
-                                    </td>
-                                    <td className="px-4 py-2 text-right font-bold text-sm font-mono">
-                                      {formatCurrency(item.totalPrice)}
-                                    </td>
-                                    <td className="px-4 py-2 text-center">
-                                      <button 
-                                        onClick={() => setSelectedItemForPricing({ index: i, item })}
-                                        className={cn(
-                                          "p-1.5 rounded-lg transition-all",
-                                          item.source === 'engineering' ? "bg-orange-100 text-orange-600" : "bg-neutral-100 text-neutral-400 hover:text-neutral-900"
-                                        )}
-                                        title="Formação de Preço (BDI)"
-                                      >
-                                        <Calculator size={14} />
-                                      </button>
-                                    </td>
-                                    <td className="px-2 py-2 text-right">
-                                      <button onClick={() => updateCommercial('items', proposal.commercialProposal!.items.filter((_, idx) => idx !== i))}>
-                                        <Trash2 size={14} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                            {proposal.commercialProposal?.items.length === 0 && (
-                              <div className="p-12 text-center text-xs opacity-40 italic">
-                                Nenhum item adicionado à precificação.
-                              </div>
-                            )}
+                         {/* Summary toggle */}
+                         <div className="flex items-center justify-end -mt-2">
+                           <button
+                             onClick={() => {
+                               const next = !summaryView;
+                               setSummaryView(next);
+                               updateCommercial('hideItemDetails', next);
+                             }}
+                             className={cn(
+                               'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border',
+                               summaryView
+                                 ? 'bg-black text-white border-black'
+                                 : 'bg-white text-black/50 border-black/10 hover:border-black/30 hover:text-black'
+                             )}
+                           >
+                             ≡ Resumo
+                           </button>
                          </div>
+
+                         {summaryView ? (
+                           /* ── MODO RESUMO: apenas o valor total ── */
+                           <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-8 flex flex-col items-center justify-center gap-2">
+                             <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Valor Total da Proposta</p>
+                             <p className="text-4xl font-black tracking-tighter text-[var(--color-brand-primary)]">
+                               {formatCurrency(calculateTotal(proposal.commercialProposal?.items || []))}
+                             </p>
+                             <p className="text-[10px] opacity-30 font-medium">
+                               {proposal.commercialProposal?.items?.length ?? 0} {(proposal.commercialProposal?.items?.length ?? 0) === 1 ? 'item' : 'itens'}
+                             </p>
+                           </div>
+                         ) : (
+                           /* ── MODO DETALHADO: tabela completa ── */
+                           <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+                              <table className="w-full text-left text-sm">
+                                <thead className="text-[10px] uppercase opacity-40 font-bold border-b border-black/5">
+                                  <tr>
+                                    <th className="px-4 py-3">Descrição</th>
+                                    <th className="px-4 py-3 w-20 text-center">Quant.</th>
+                                    <th className="px-4 py-3 w-24 text-right">Unitário</th>
+                                    <th className="px-4 py-3 w-32 text-right">Total</th>
+                                    <th className="px-4 py-3 w-20 text-center">Ações</th>
+                                    <th className="px-4 py-3 w-10"></th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-black/5">
+                                  {proposal.commercialProposal?.items?.map((item, i) => (
+                                    <tr key={i} className="group">
+                                      <td className="px-4 py-2">
+                                        <input
+                                          id={`pw-item-${item.id}`}
+                                          type="text"
+                                          value={item.description}
+                                          onChange={e => {
+                                            const next = proposal.commercialProposal!.items.map((it, idx) =>
+                                              idx === i ? { ...it, description: e.target.value } : it
+                                            );
+                                            updateCommercial('items', next);
+                                          }}
+                                          className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
+                                          placeholder="Descrição do item ou serviço..."
+                                        />
+                                      </td>
+                                      <td className="px-4 py-2">
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          min="0"
+                                          value={item.quantity === 0 ? '' : item.quantity}
+                                          onChange={e => {
+                                            const qty = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                            const next = proposal.commercialProposal!.items.map((it, idx) => {
+                                              if (idx === i) {
+                                                return { ...it, quantity: qty, totalPrice: qty * (it.unitPrice || 0) };
+                                              }
+                                              return it;
+                                            });
+                                            updateCommercial('items', next);
+                                          }}
+                                          className="w-full bg-transparent border-none focus:ring-0 p-0 text-center text-sm"
+                                        />
+                                      </td>
+                                      <td className="px-4 py-2">
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          value={item.unitPrice === 0 ? '' : item.unitPrice}
+                                          onChange={e => {
+                                            const price = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                            const next = proposal.commercialProposal!.items.map((it, idx) => {
+                                              if (idx === i) {
+                                                return { ...it, unitPrice: price, totalPrice: (it.quantity || 0) * price };
+                                              }
+                                              return it;
+                                            });
+                                            updateCommercial('items', next);
+                                          }}
+                                          className="w-full bg-transparent border-none focus:ring-0 p-0 text-right text-sm font-mono"
+                                        />
+                                      </td>
+                                      <td className="px-4 py-2 text-right font-bold text-sm font-mono">
+                                        {formatCurrency(item.totalPrice)}
+                                      </td>
+                                      <td className="px-4 py-2 text-center">
+                                        <button
+                                          onClick={() => setSelectedItemForPricing({ index: i, item })}
+                                          className={cn(
+                                            "p-1.5 rounded-lg transition-all",
+                                            item.source === 'engineering' ? "bg-orange-100 text-orange-600" : "bg-neutral-100 text-neutral-400 hover:text-neutral-900"
+                                          )}
+                                          title="Formação de Preço (BDI)"
+                                        >
+                                          <Calculator size={14} />
+                                        </button>
+                                      </td>
+                                      <td className="px-2 py-2 text-right">
+                                        <button onClick={() => updateCommercial('items', proposal.commercialProposal!.items.filter((_, idx) => idx !== i))}>
+                                          <Trash2 size={14} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {proposal.commercialProposal?.items.length === 0 && (
+                                <div className="p-12 text-center text-xs opacity-40 italic">
+                                  Nenhum item adicionado à precificação.
+                                </div>
+                              )}
+                           </div>
+                         )}
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
@@ -893,26 +1313,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                   )}
 
                   {step === 5 && (
-                    <motion.div 
+                    <motion.div
                        key="step-5"
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       exit={{ opacity: 0, x: -20 }}
-                       className="flex-1"
-                    >
-                      <PricingFormulation 
-                        proposal={proposal}
-                        onChange={(pricing) => setProposal(prev => ({ ...prev, pricing }))}
-                        onApply={(total) => {
-                          updateCommercial('totalValue', total);
-                        }}
-                      />
-                    </motion.div>
-                  )}
-
-                  {step === 6 && (
-                    <motion.div 
-                       key="step-6"
                        initial={{ opacity: 0, x: 20 }}
                        animate={{ opacity: 1, x: 0 }}
                        exit={{ opacity: 0, x: -20 }}
@@ -1012,7 +1414,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                         <Save size={16} /> {loading ? 'Salvando...' : 'Salvar Rascunho'}
                       </button>
                       
-                      {step < 6 ? (
+                      {step < 5 ? (
                         <button 
                           onClick={() => setStep(step + 1)}
                           className="px-8 py-2 bg-[var(--color-brand-primary)] text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:opacity-90 transition-all font-mono"

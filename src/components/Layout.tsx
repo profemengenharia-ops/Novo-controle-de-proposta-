@@ -13,7 +13,8 @@ import {
   Sparkles,
   FilePlus,
   ClipboardList,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  Briefcase,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -32,8 +33,9 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'proposals', label: 'Propostas', icon: FileText },
+    { id: 'commercial', label: 'Comercial', icon: Briefcase },
     { id: 'estimates', label: 'Orçamentos', icon: ClipboardList },
+    { id: 'proposals', label: 'Propostas', icon: FileText },
     { id: 'norms', label: 'Normas & Blocos', icon: BookOpen },
     { id: 'reports', label: 'Relatórios', icon: PieChartIcon },
   ];

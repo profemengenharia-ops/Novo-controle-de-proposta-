@@ -10,8 +10,10 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { ProposalList } from './components/ProposalList';
+import { ProposalManager } from './components/ProposalManager';
 import { ProposalWizard } from './components/ProposalWizard';
 import { BudgetManager } from './components/BudgetManager';
+import { CommercialHub } from './components/CommercialHub';
 import { NormsManager } from './components/NormsManager';
 import { PublicProposalView } from './components/PublicProposalView';
 import { ManualProposalModal } from './components/ManualProposalModal';
@@ -95,7 +97,7 @@ function AppContent() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard setActiveTab={setActiveTab} onShowRadar={() => setShowRadar(true)} />;
-      case 'proposals': return <ProposalList onEdit={(id) => { setActiveTab(`edit-${id}`); }} />;
+      case 'proposals': return <ProposalManager />;
       case 'new-proposal': return <ProposalWizard onComplete={() => setActiveTab('proposals')} />;
       case 'manual-proposal': return (
         <React.Fragment>
@@ -103,7 +105,16 @@ function AppContent() {
           <ManualProposalModal onClose={() => setActiveTab('dashboard')} onComplete={() => setActiveTab('proposals')} />
         </React.Fragment>
       );
-      case 'estimates': return <BudgetManager />;
+      case 'commercial': return (
+        <CommercialHub
+          onOpenProposal={(proposalId) => setActiveTab(`edit-${proposalId}`)}
+        />
+      );
+      case 'estimates': return (
+        <BudgetManager
+          onNavigateToProposal={(proposalId) => setActiveTab(`edit-${proposalId}`)}
+        />
+      );
       case 'norms': return <NormsManager />;
       case 'reports': return <Reports />;
       default: 

@@ -27,6 +27,8 @@ const mapFromDb = (row: any): BudgetProject => ({
   title: row.title,
   clientName: row.client_name,
   address: row.address,
+  clientId: row.client_id ?? undefined,
+  obraId: row.obra_id ?? undefined,
   status: row.status as BudgetStatus,
   responsible: row.responsible,
   notes: row.notes,
@@ -48,6 +50,8 @@ const mapToDb = (p: Partial<BudgetProject>) => {
   if (p.title !== undefined) data.title = p.title;
   if (p.clientName !== undefined) data.client_name = p.clientName;
   if (p.address !== undefined) data.address = p.address;
+  if (p.clientId !== undefined) data.client_id = p.clientId;
+  if (p.obraId !== undefined) data.obra_id = p.obraId;
   if (p.status !== undefined) data.status = p.status;
   if (p.responsible !== undefined) data.responsible = p.responsible;
   if (p.notes !== undefined) data.notes = p.notes;
@@ -125,7 +129,10 @@ export const budgetProjectService = {
   },
 
   async create(
-    fields: Pick<BudgetProject, 'title' | 'clientName' | 'address' | 'responsible' | 'notes'>,
+    fields: Pick<BudgetProject, 'title' | 'clientName' | 'address' | 'responsible' | 'notes'> & {
+      clientId?: string;
+      obraId?: string;
+    },
     userId: string,
   ): Promise<string> {
     const id = crypto.randomUUID();
@@ -134,7 +141,13 @@ export const budgetProjectService = {
     if (isMockMode) {
       const newProject: BudgetProject = {
         id,
-        ...fields,
+        title: fields.title,
+        clientName: fields.clientName,
+        address: fields.address,
+        responsible: fields.responsible,
+        notes: fields.notes,
+        clientId: fields.clientId,
+        obraId: fields.obraId,
         status: BudgetStatus.DRAFT,
         stages: [],
         indirectCosts: defaultIndirectCosts(),

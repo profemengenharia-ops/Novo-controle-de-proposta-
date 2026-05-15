@@ -14,57 +14,101 @@ import {
   X,
   Layers,
   HardHat,
+  Inbox,
 } from 'lucide-react';
 import { Product, BudgetProject } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { usePricingEngine, PricingSettings, PricingItem } from '../hooks/usePricingEngine';
 import { inventoryService } from '../services/inventoryService';
 import { supplierService } from '../services/supplierService';
+import { obraService } from '../services/obraService';
 import { BudgetItemModal } from './BudgetItemModal';
 import { BudgetProjectList } from './BudgetProjectList';
 import { BudgetEditor } from './BudgetEditor';
 import { LaborRateManager } from './LaborRateManager';
+import { OrcamentosInbox } from './OrcamentosInbox';
 
-type Tab = 'orcamentos' | 'catalogo' | 'mao_de_obra';
+type Tab = 'inbox' | 'orcamentos' | 'catalogo' | 'mao_de_obra';
 
-export function BudgetManager() {
-  const [activeTab, setActiveTab] = useState<Tab>('orcamentos');
+interface BudgetManagerProps {
+  onNavigateToProposal?: (proposalId: string) => void;
+}
+
+export function BudgetManager({ onNavigateToProposal }: BudgetManagerProps = {}) {
+  const [activeTab, setActiveTab] = useState<Tab>('inbox');
   const [openProject, setOpenProject] = useState<BudgetProject | null>(null);
+  const [inboxCount, setInboxCount] = useState(0);
+  const [inboxRefresh, setInboxRefresh] = useState(0);
+
+  // Fetch inbox count for badge
+  useEffect(() => {
+    obraService.getAll().then(obras => {
+      setInboxCount(obras.filter(o => o.status === 'aguardando_orcamento').length);
+    });
+  }, [inboxRefresh]);
 
   const handleOpenProject = (project: BudgetProject) => {
     setOpenProject(project);
   };
 
+  const handleAssumeFromInbox = (project: BudgetProject) => {
+    setInboxRefresh(r => r + 1);
+    setOpenProject(project);
+  };
+
   if (openProject) {
-    return <BudgetEditor project={openProject} onBack={() => setOpenProject(null)} />;
+    return (
+      <BudgetEditor
+        project={openProject}
+        onBack={() => { setOpenProject(null); setInboxRefresh(r => r + 1); }}
+        onSendToProposal={onNavigateToProposal}
+      />
+    );
   }
+
+  const tabs = [
+    { id: 'inbox' as Tab, label: 'Inbox', icon: <Inbox size={14} />, badge: inboxCount },
+    { id: 'orcamentos' as Tab, label: 'Orçamentos', icon: <Layers size={14} /> },
+    { id: 'catalogo' as Tab, label: 'Catálogo', icon: <Package size={14} /> },
+    { id: 'mao_de_obra' as Tab, label: 'Mão de Obra', icon: <HardHat size={14} /> },
+  ];
 
   return (
     <div className="space-y-6">
-        {/* Abas internas */}
-        <motion.div
-          className="flex items-center gap-2 p-2 bg-gradient-to-r from-[var(--color-brand-primary)] to-[var(--color-brand-secondary)] rounded-2xl shadow-lg"
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          {[{ id: 'orcamentos', label: 'Orçamentos', icon: <Layers size={14} /> },
-            { id: 'catalogo', label: 'Catálogo', icon: <Package size={14} /> },
-            { id: 'mao_de_obra', label: 'Mão de Obra', icon: <HardHat size={14} /> }].map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id as Tab)}
-              className={cn(
-                'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold uppercase tracking-widest transition-colors',
-                activeTab === item.id
-                  ? 'bg-white text-[var(--color-brand-primary)] shadow-md'
-                  : 'text-white hover:bg-white/20'
-              )}
-            >
-              {item.icon} {item.label}
-            </button>
-          ))}
-        </motion.div>
+      {/* Abas internas */}
+      <motion.div
+        className="flex items-center gap-2 p-2 bg-gradient-to-r from-[var(--color-brand-primary)] to-[var(--color-brand-secondary)] rounded-2xl shadow-lg"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        {tabs.map(item => (
+          <button
+            key={item.id}
+            onClick={() => setActiveTab(item.id)}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold uppercase tracking-widest transition-colors relative',
+              activeTab === item.id
+                ? 'bg-white text-[var(--color-brand-primary)] shadow-md'
+                : 'text-white hover:bg-white/20'
+            )}
+          >
+            {item.icon} {item.label}
+            {item.badge != null && item.badge > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-amber-400 text-black text-[9px] font-black rounded-full flex items-center justify-center px-1 shadow">
+                {item.badge > 9 ? '9+' : item.badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </motion.div>
+
+      {activeTab === 'inbox' && (
+        <OrcamentosInbox
+          onAssume={handleAssumeFromInbox}
+          refreshSignal={inboxRefresh}
+        />
+      )}
 
       {activeTab === 'orcamentos' && (
         <BudgetProjectList onOpen={handleOpenProject} />

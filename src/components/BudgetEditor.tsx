@@ -2,15 +2,18 @@ import React, { useState, useCallback, useMemo } from 'react';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, Save, Check,
   Package, HardHat, Wrench, Truck, Edit2, GripVertical,
-  AlertCircle, TrendingUp, Settings2, ChevronUp,
+  AlertCircle, TrendingUp, Settings2, ChevronUp, Send,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import {
   BudgetProject, BudgetStatus, BudgetStage, BudgetLineItem,
   BudgetLineType, BudgetBDI, BudgetIndirectCosts,
+  ProposalStatus,
 } from '../types';
 import { budgetProjectService } from '../services/budgetProjectService';
+import { proposalService } from '../services/proposalService';
+import { obraService } from '../services/obraService';
 import { formatCurrency, cn, calculateBDI } from '../lib/utils';
 import { AddBudgetItemModal } from './AddBudgetItemModal';
 import { BudgetPrintView } from './BudgetPrintView';
@@ -86,9 +89,11 @@ function computeBDI(bdi: BudgetBDI): number {
 interface Props {
   project: BudgetProject;
   onBack: () => void;
+  /** Called after "Enviar para Proposta" with the new proposal's id */
+  onSendToProposal?: (proposalId: string) => void;
 }
 
-export function BudgetEditor({ project: initial, onBack }: Props) {
+export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Props) {
   const [project, setProject] = useState<BudgetProject>(initial);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -102,6 +107,7 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
   const [addItemModal, setAddItemModal] = useState<{ stageId: string; item?: BudgetLineItem } | null>(null);
   const [showBDIPanel, setShowBDIPanel] = useState(false);
   const [showIndirectPanel, setShowIndirectPanel] = useState(false);
+  const [sendingToProposal, setSendingToProposal] = useState(false);
 
   // ─── Derived financials ────────────────────────────────────────────────────
 
@@ -224,6 +230,106 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
     }
   };
 
+  // ─── Enviar para Proposta ─────────────────────────────────────────────────
+
+  const handleSendToProposal = async () => {
+    if (finalPrice <= 0) {
+      toast.error('O orçamento precisa ter valor final maior que zero antes de enviar para Proposta.');
+      return;
+    }
+    if (project.linkedProposalId) {
+      const go = confirm('Este orçamento já tem uma proposta vinculada. Deseja abri-la?');
+      if (go && onSendToProposal) onSendToProposal(project.linkedProposalId);
+      return;
+    }
+    if (!confirm(`Enviar orçamento "${project.title}" para o setor de Propostas?`)) return;
+
+    setSendingToProposal(true);
+    try {
+      // 1. Auto-save se houver alterações pendentes
+      if (dirty) {
+        await budgetProjectService.update(project.id, {
+          ...project,
+          totalDirectCost,
+          totalIndirectCost,
+          totalBDI,
+          finalPrice,
+          bdi: { ...project.bdi, calculatedBDI: calculatedBDIPct },
+        });
+        setDirty(false);
+      }
+
+      // 2. Montar itens comerciais a partir dos itens do orçamento
+      const proposalItems = project.stages.flatMap(stage =>
+        stage.items.map(item => ({
+          id: crypto.randomUUID(),
+          description: item.description,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPrice: item.unitCost,
+          totalPrice: item.totalCost,
+          source: 'engineering' as const,
+        }))
+      );
+
+      // 3. Criar a Proposta com dados herdados do orçamento
+      const year = new Date().getFullYear();
+      const seq = crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4);
+      const proposalId = await proposalService.createProposal({
+        clientName: project.clientName,
+        proposalNumber: `PF-${year}-${seq}`,
+        revision: '00',
+        status: ProposalStatus.DRAFT,
+        validityDays: 30,
+        scopeTitle: project.title,
+        deadline: '30 dias',
+        followUpDate: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        technicalScope: {
+          generalConsiderations: project.notes ?? '',
+          references: [],
+          norms: [],
+          items: [],
+          safetyNotes: '',
+          exclusions: [],
+          contractorObligations: [],
+          contracteeObligations: [],
+        },
+        commercialProposal: {
+          totalValue: finalPrice,
+          paymentTerms: 'Faturamento total para 07 DDL após a finalização dos trabalhos',
+          reajuste: 'Não aplicável durante o prazo de validade da proposta',
+          guarantee: 'Conforme manual do fabricante',
+          items: proposalItems,
+          pricingMode: 'manual',
+        },
+        budgetProjectId: project.id,
+        obraId: project.obraId,
+        clientId: project.clientId,
+        createdBy: 'mock-user',
+      });
+
+      // 4. Vincula a proposta ao BudgetProject
+      await budgetProjectService.update(project.id, { linkedProposalId: proposalId });
+      setProject(p => ({ ...p, linkedProposalId: proposalId }));
+
+      // 5. Atualiza o status da Obra → em_proposta
+      if (project.obraId) {
+        await obraService.update(project.obraId, {
+          status: 'em_proposta',
+          proposalId,
+        });
+      }
+
+      toast.success('Proposta criada e encaminhada para o setor de Propostas!');
+      onSendToProposal?.(proposalId);
+    } catch (err) {
+      toast.error('Erro ao enviar para Proposta.');
+      console.error(err);
+    } finally {
+      setSendingToProposal(false);
+    }
+  };
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -260,6 +366,34 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
               calculatedBDIPct={calculatedBDIPct}
               byType={byType}
             />
+
+            {/* Enviar para Proposta — só exibe quando o callback estiver conectado */}
+            {onSendToProposal !== undefined && (
+              <button
+                onClick={handleSendToProposal}
+                disabled={sendingToProposal || finalPrice <= 0}
+                title={finalPrice <= 0 ? 'Adicione itens ao orçamento antes de enviar' : undefined}
+                className={cn(
+                  'flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all',
+                  project.linkedProposalId
+                    ? 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-600/20'
+                    : finalPrice > 0
+                    ? 'bg-orange-500 text-white hover:bg-orange-600 shadow-lg shadow-orange-500/20'
+                    : 'bg-black/5 text-black/30 cursor-not-allowed'
+                )}
+              >
+                {sendingToProposal
+                  ? <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white" />
+                  : <Send size={14} />
+                }
+                {sendingToProposal
+                  ? 'Enviando…'
+                  : project.linkedProposalId
+                  ? 'Ver Proposta'
+                  : 'Enviar p/ Proposta'
+                }
+              </button>
+            )}
 
             <button
               onClick={handleSave}

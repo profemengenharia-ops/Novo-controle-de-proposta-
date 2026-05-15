@@ -28,6 +28,13 @@ export interface TechnicalScope {
   exclusions: string[];
   contractorObligations: string[];
   contracteeObligations: string[];
+  // Seção 6 – Considerações ao Escopo (usa padrão ProFem se omitido)
+  scopeConsiderations?: string;
+  // Seção 10 – Horário de Trabalho (usa padrão se omitido)
+  workingHours?: string;
+  // Seção 11 – Prazo de Execução
+  mobilizationDays?: number;   // ex: 5 (dias após confirmação)
+  executionTime?: string;      // ex: "90 dias corridos"
 }
 
 export interface CDDetails {
@@ -80,6 +87,7 @@ export interface CommercialProposal {
   guarantee: string;
   items: CommercialItem[];
   pricingMode: 'manual' | 'catalog' | 'spreadsheet' | 'erp';
+  hideItemDetails?: boolean;
 }
 
 export interface ContractDetails {
@@ -109,6 +117,10 @@ export interface Proposal {
   scopeTitle?: string;
   lossReason?: string;
   pricing?: GlobalPriceFormation;
+  // vínculos com o fluxo Comercial → Orçamentos → Proposta
+  budgetProjectId?: string; // FK → BudgetProject
+  obraId?: string;          // FK → Obra
+  clientId?: string;        // FK → Client
 }
 
 export interface PricingBudgetItem {
@@ -228,8 +240,11 @@ export interface BudgetBDI {
 export interface BudgetProject {
   id: string;
   title: string;
-  clientName: string;
-  address?: string;
+  clientName: string;   // mantido para legado e exibição rápida
+  address?: string;     // mantido para legado
+  // vínculos novos (preenchidos quando criado a partir do fluxo Comercial)
+  clientId?: string;    // FK → Client
+  obraId?: string;      // FK → Obra
   status: BudgetStatus;
   responsible?: string;
   notes?: string;
@@ -244,6 +259,80 @@ export interface BudgetProject {
   updatedAt: string;
   createdBy: string;
   linkedProposalId?: string;
+}
+
+// ─── Cadastro Comercial: Cliente + Obra ──────────────────────────────────────
+
+export interface ClientContact {
+  id: string;
+  name: string;
+  role?: string;     // cargo
+  email?: string;
+  phone?: string;
+  isPrimary?: boolean;
+}
+
+export interface Client {
+  id: string;
+  companyName: string;       // razão social
+  tradeName?: string;        // nome fantasia
+  cnpj?: string;
+  cpf?: string;              // PF
+  ie?: string;               // inscrição estadual
+  segment?: string;          // segmento de atuação
+  contacts: ClientContact[];
+  billingAddress?: string;
+  city?: string;
+  state?: string;
+  cep?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+export type ObraType =
+  | 'residencial'
+  | 'comercial'
+  | 'industrial'
+  | 'reforma'
+  | 'manutencao'
+  | 'infraestrutura'
+  | 'outro';
+
+export type ObraStatus =
+  | 'prospeccao'        // só registrada
+  | 'aguardando_orcamento'
+  | 'em_orcamento'
+  | 'orcada'
+  | 'em_proposta'
+  | 'proposta_enviada'
+  | 'ganha'
+  | 'perdida'
+  | 'cancelada';
+
+export interface Obra {
+  id: string;
+  clientId: string;          // FK obrigatória
+  name: string;              // ex.: "Edifício Aurora — Torre B"
+  type?: ObraType;
+  status: ObraStatus;
+  address?: string;
+  city?: string;
+  state?: string;
+  cep?: string;
+  estimatedArea?: number;    // m²
+  startDate?: string;
+  deadline?: string;
+  scopeSummary?: string;     // descrição do que o cliente quer
+  attachments?: string[];    // links/URLs
+  notes?: string;
+  // vínculos com etapas downstream (preenchidos pelos próximos setores)
+  budgetProjectId?: string;
+  proposalId?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
 }
 
 export interface LaborRate {

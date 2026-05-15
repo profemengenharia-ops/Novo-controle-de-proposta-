@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { proposalService } from '../services/proposalService';
+import { obraService } from '../services/obraService';
 import { useAuth } from '../hooks/useAuth';
 import { Proposal, ProposalStatus, ProposalInteraction } from '../types';
 import { 
@@ -133,6 +134,26 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     }
   };
 
+  const handleMarkReadyForCommercial = async (p: Proposal) => {
+    if (!confirm(`Marcar proposta "${p.proposalNumber}" como pronta para envio ao cliente?`)) return;
+    try {
+      // Atualiza status da Proposta → SENT
+      await proposalService.updateProposal(p.id, { status: ProposalStatus.SENT });
+      // Atualiza status da Obra → proposta_enviada
+      if (p.obraId) {
+        await obraService.update(p.obraId, { status: 'proposta_enviada' });
+      }
+      setProposals(proposals.map(item =>
+        item.id === p.id ? { ...item, status: ProposalStatus.SENT } : item
+      ));
+      // Sonner não está importado aqui, usa alert simples
+      alert('Proposta marcada como pronta! O Comercial receberá a notificação na aba Comercial → Propostas Prontas.');
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao atualizar status.');
+    }
+  };
+
   const handleSaveLossReason = async () => {
     if (!lossReasonProposalId) return;
     const p = proposals.find(p => p.id === lossReasonProposalId);
@@ -213,8 +234,15 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                     </div>
                   </td>
                   <td className="px-8 py-5">
-                     <div className="flex flex-col max-w-[200px]">
-                       <span className="font-bold text-sm tracking-tight truncate">{p.clientName}</span>
+                     <div className="flex flex-col max-w-[220px]">
+                       <div className="flex items-center gap-2">
+                         <span className="font-bold text-sm tracking-tight truncate">{p.clientName}</span>
+                         {p.budgetProjectId && (
+                           <span className="shrink-0 text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">
+                             Orç.
+                           </span>
+                         )}
+                       </div>
                        <span className="text-[10px] opacity-40 uppercase truncate font-medium">{p.scopeTitle || 'Serviços de Engenharia'}</span>
                      </div>
                   </td>
@@ -247,7 +275,14 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                   </td>
                   <td className="px-8 py-5 text-right relative">
                     <div className="flex items-center justify-end gap-2">
-                       <button 
+                       {/* Primary CTA — opens the wizard pre-filled with all proposal data */}
+                       <button
+                        onClick={(e) => { e.stopPropagation(); onEdit(p.id); }}
+                        className="px-4 py-2 border-2 border-black/90 text-black rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-black hover:text-white transition-all whitespace-nowrap"
+                       >
+                         Proposta
+                       </button>
+                       <button
                         onClick={(e) => { e.stopPropagation(); setActiveActionsMenu(activeActionsMenu === p.id ? null : p.id) }}
                         className="p-2 hover:bg-black/5 rounded-lg text-black/60 transition-all"
                        >
@@ -265,6 +300,15 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             <button onClick={() => handleDuplicateWithRevision(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <History size={14} className="opacity-40" /> Gerar Nova Revisão
                             </button>
+                            {/* Handoff → Comercial: só para propostas do fluxo (obraId) em rascunho */}
+                            {p.obraId && p.status === ProposalStatus.DRAFT && (
+                              <button
+                                onClick={() => { handleMarkReadyForCommercial(p); setActiveActionsMenu(null); }}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-green-50 text-green-700 font-bold transition-colors border-t border-black/5 mt-1 pt-2"
+                              >
+                                <Send size={14} className="opacity-60" /> Pronto p/ Envio ao Cliente
+                              </button>
+                            )}
                             <button onClick={() => window.open(`/proposal/${p.id}`, '_blank')} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <ExternalLink size={14} className="opacity-40" /> Copiar Link Público
                             </button>
