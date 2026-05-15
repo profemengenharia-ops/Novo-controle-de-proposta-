@@ -1,5 +1,6 @@
 import { supabase, isMockMode } from '../lib/supabase';
 import { Client, ClientContact } from '../types';
+import { logger } from '../lib/logger';
 
 const TABLE = 'clients';
 
@@ -95,7 +96,7 @@ export const clientService = {
       .from(TABLE)
       .select('*')
       .order('updated_at', { ascending: false });
-    if (error) { console.error(error); return []; }
+    if (error) { logger.error('clientService.getAll', error); return []; }
     return data.map(mapFromDb);
   },
 

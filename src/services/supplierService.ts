@@ -1,4 +1,5 @@
 import { Product } from '../types';
+import { logger } from '../lib/logger';
 
 export interface SupplierConfig {
   baseUrl: string;
@@ -43,6 +44,7 @@ export const supplierService = {
 
   syncProduct: async (productId: string, supplierProductData: Partial<Product>) => {
     // Logic to update local product with supplier data
-    console.log(`Syncing product ${productId} with data:`, supplierProductData);
+    // Não loga supplierProductData (pode conter preços e dados comerciais sensíveis)
+    logger.info('supplierService.syncProduct', { productId });
   }
 };

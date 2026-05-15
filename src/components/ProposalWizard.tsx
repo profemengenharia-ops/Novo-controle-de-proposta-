@@ -31,7 +31,7 @@ import {
   Phone,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { cn, formatCurrency, formatDate, maskCNPJ, maskPhone } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import { PriceFormationModal } from './PriceFormationModal';
 import { PricingFormulation } from './PricingFormulation';
@@ -559,14 +559,14 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
                                 <p className="text-[10px] text-blue-600 font-medium">{linkedClient.tradeName}</p>
                               )}
                               {linkedClient.cnpj && (
-                                <p className="text-[10px] text-blue-500 font-mono">{linkedClient.cnpj}</p>
+                                <p className="text-[10px] text-blue-500 font-mono">{maskCNPJ(linkedClient.cnpj)}</p>
                               )}
                               {linkedClient.contacts.length > 0 && (() => {
                                 const ct = linkedClient.contacts.find(c => c.isPrimary) ?? linkedClient.contacts[0];
                                 return (
                                   <p className="text-[10px] text-blue-600 font-medium flex items-center gap-1">
                                     <Phone size={9} />
-                                    {ct.name}{ct.phone ? ` · ${ct.phone}` : ''}
+                                    {ct.name}{ct.phone ? ` · ${maskPhone(ct.phone)}` : ''}
                                   </p>
                                 );
                               })()}

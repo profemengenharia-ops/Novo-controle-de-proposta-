@@ -1,5 +1,6 @@
 import { supabase, isMockMode } from '../lib/supabase';
 import { Obra, ObraStatus, ObraType } from '../types';
+import { logger } from '../lib/logger';
 
 const TABLE = 'obras';
 
@@ -120,7 +121,7 @@ export const obraService = {
       .from(TABLE)
       .select('*')
       .order('updated_at', { ascending: false });
-    if (error) { console.error(error); return []; }
+    if (error) { logger.error('obraService.getAll', error); return []; }
     return data.map(mapFromDb);
   },
 
@@ -135,7 +136,7 @@ export const obraService = {
       .select('*')
       .eq('client_id', clientId)
       .order('updated_at', { ascending: false });
-    if (error) { console.error(error); return []; }
+    if (error) { logger.error('obraService.getByClient', error); return []; }
     return data.map(mapFromDb);
   },
 

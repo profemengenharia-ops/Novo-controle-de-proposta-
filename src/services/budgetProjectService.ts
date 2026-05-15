@@ -1,5 +1,6 @@
 import { supabase, isMockMode } from '../lib/supabase';
 import { BudgetProject, BudgetStatus, BudgetIndirectCosts, BudgetBDI } from '../types';
+import { logger } from '../lib/logger';
 
 const TABLE = 'budget_projects';
 
@@ -117,7 +118,7 @@ export const budgetProjectService = {
       .from(TABLE)
       .select('*')
       .order('updated_at', { ascending: false });
-    if (error) { console.error(error); return []; }
+    if (error) { logger.error('budgetProjectService.getAll', error); return []; }
     return data.map(mapFromDb);
   },
 

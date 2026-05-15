@@ -1,5 +1,6 @@
 import { supabase, isMockMode } from '../lib/supabase';
 import { Product } from '../types';
+import { logger } from '../lib/logger';
 
 const TABLE_NAME = 'products';
 
@@ -48,7 +49,7 @@ export const inventoryService = {
       .order('name', { ascending: true });
 
     if (error) {
-      console.error('Error fetching products:', error);
+      logger.error('inventoryService.getAllProducts', error);
       return [];
     }
     return data.map(mapFromDb);
@@ -102,7 +103,7 @@ export const inventoryService = {
     const results = await Promise.all(promises);
     const errors = results.filter(r => r.error);
     if (errors.length > 0) {
-      console.error('Batch update errors:', errors);
+      logger.error('inventoryService.updateProductsBatch', `${errors.length} erros`, { count: errors.length });
       throw new Error('Failed to update some products in batch');
     }
   },

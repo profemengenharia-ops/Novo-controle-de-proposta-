@@ -77,6 +77,42 @@ export function calculateBDI(config: {
   return bdiValue;
 }
 
+/**
+ * Mascara CNPJ para exibicao na UI - ex: 12.345.678/0001-90 -> 12.***.***\/0001-90
+ * Preserva apenas suficiente para identificacao sem expor o numero completo.
+ */
+export function maskCNPJ(cnpj: string | undefined | null): string {
+  if (!cnpj) return '-';
+  // Remove formatação
+  const digits = cnpj.replace(/\D/g, '');
+  if (digits.length !== 14) return cnpj; // retorna original se formato inesperado
+  // Mostra apenas os 2 primeiros dígitos, mascara os 6 do meio, mostra filial e dígitos
+  return `${digits.slice(0, 2)}.***.***/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
+/**
+ * Mascara CPF para exibicao na UI - ex: 123.456.789-01 -> ***.456.***-01
+ */
+export function maskCPF(cpf: string | undefined | null): string {
+  if (!cpf) return '-';
+  const digits = cpf.replace(/\D/g, '');
+  if (digits.length !== 11) return cpf;
+  return `***.${digits.slice(3, 6)}.***-${digits.slice(9)}`;
+}
+
+/**
+ * Mascara telefone para exibicao - mantem DDD e ultimos 4 digitos.
+ * Ex: (11) 99999-0001 -> (11) *****-0001
+ */
+export function maskPhone(phone: string | undefined | null): string {
+  if (!phone) return '-';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 10) return phone;
+  const ddd = digits.slice(0, 2);
+  const last4 = digits.slice(-4);
+  return `(${ddd}) *****-${last4}`;
+}
+
 export function safeParseJSON<T>(text: string, defaultValue: T): T {
   try {
     // Try clean parse first

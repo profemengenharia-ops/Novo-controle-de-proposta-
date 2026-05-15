@@ -1,5 +1,6 @@
 import { supabase, isMockMode } from '../lib/supabase';
 import { LaborRate } from '../types';
+import { logger } from '../lib/logger';
 
 const TABLE = 'labor_rates';
 
@@ -37,7 +38,7 @@ export const laborRateService = {
   async getAll(): Promise<LaborRate[]> {
     if (isMockMode) return MOCK_RATES;
     const { data, error } = await supabase.from(TABLE).select('*').order('role');
-    if (error) { console.error(error); return []; }
+    if (error) { logger.error('laborRateService.getAll', error); return []; }
     return data.map(mapFromDb);
   },
 
