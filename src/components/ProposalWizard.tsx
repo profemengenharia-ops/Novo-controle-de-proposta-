@@ -227,6 +227,8 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
         }
       };
 
+      let newProposalId: string | undefined;
+
       if (proposal.id) {
         let nextRev = proposal.revision || '00';
         if (revisionNote) {
@@ -234,12 +236,12 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
           nextRev = String(revNum + 1).padStart(2, '0');
         }
 
-        await proposalService.updateProposal(proposal.id, { 
-          ...proposalToSave, 
-          revision: nextRev 
+        await proposalService.updateProposal(proposal.id, {
+          ...proposalToSave,
+          revision: nextRev
         }, revisionNote);
       } else {
-        await proposalService.createProposal({
+        newProposalId = await proposalService.createProposal({
           ...proposalToSave as Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'>,
           createdBy: user?.id || ''
         });
@@ -255,7 +257,12 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
           ];
           const currentObra = linkedObra ?? await obraService.getById(obraId).catch(() => null);
           if (currentObra && ADVANCE_FROM.includes(currentObra.status)) {
-            await obraService.update(obraId, { status: 'em_proposta' });
+            await obraService.update(obraId, {
+              status: 'em_proposta',
+              // Link obra ↔ proposal so downstream (CRMKanban, PropostasInboxComercial)
+              // can find the proposal when the card is advanced to "proposta_enviada".
+              ...(newProposalId ? { proposalId: newProposalId } : {}),
+            });
             // Update local reference so stale status isn't used again in this session
             setLinkedObra(prev => prev ? { ...prev, status: 'em_proposta' } : prev);
           }

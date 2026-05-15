@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { useAuth } from '../hooks/useAuth';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, Save, Check,
   Package, HardHat, Wrench, Truck, Edit2, GripVertical,
@@ -94,6 +95,7 @@ interface Props {
 }
 
 export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Props) {
+  const { user } = useAuth();
   const [project, setProject] = useState<BudgetProject>(initial);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -305,7 +307,7 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
         budgetProjectId: project.id,
         obraId: project.obraId,
         clientId: project.clientId,
-        createdBy: 'mock-user',
+        createdBy: user?.id || '',
       });
 
       // 4. Vincula a proposta ao BudgetProject
