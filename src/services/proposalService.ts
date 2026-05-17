@@ -155,17 +155,33 @@ export const proposalService = {
   },
 
   async updateProposal(id: string, updates: Partial<Proposal>, revisionNote?: string): Promise<void> {
+    // Bug #17: revisionNote era recebido mas completamente ignorado na persistência.
+    // Agora é adicionado ao array de revisions se fornecido.
+    let finalUpdates = { ...updates };
+
+    if (revisionNote) {
+      const newRevisionEntry = {
+        note: revisionNote,
+        revision: updates.revision ?? '00',
+        timestamp: now(),
+      };
+      // Concatena ao array existente de revisions (que pode vir nos updates ou ser buscado do DB)
+      finalUpdates.revisions = [
+        ...(Array.isArray(updates.revisions) ? updates.revisions : []),
+        newRevisionEntry,
+      ];
+    }
+
     if (isMockMode) {
       const idx = MOCK_STORE.findIndex(p => p.id === id);
       if (idx !== -1) {
-        MOCK_STORE[idx] = { ...MOCK_STORE[idx], ...updates, updatedAt: now() };
+        MOCK_STORE[idx] = { ...MOCK_STORE[idx], ...finalUpdates, updatedAt: now() };
       }
       return;
     }
-    let finalUpdates = mapToDb(updates);
     const { error } = await supabase
       .from(TABLE_NAME)
-      .update(finalUpdates)
+      .update(mapToDb(finalUpdates))
       .eq('id', id);
     if (error) throw error;
   },

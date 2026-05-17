@@ -106,14 +106,16 @@ export function AddBudgetItemModal({ onClose, onAdd, editingItem }: Props) {
 
   // Fetch catalog on first tab switch
   useEffect(() => {
-    if (tab === 'catalogo' && catalogProducts.length === 0) {
-      setLoadingCatalog(true);
-      inventoryService.getAllProducts().then(data => {
-        setCatalogProducts(data);
-        setLoadingCatalog(false);
-      });
-    }
-  }, [tab]);
+    if (tab !== 'catalogo' || catalogProducts.length > 0) return;
+    // Bug #14: sem cancelled flag e sem catch o spinner ficava travado para sempre
+    let cancelled = false;
+    setLoadingCatalog(true);
+    inventoryService.getAllProducts()
+      .then(data => { if (!cancelled) setCatalogProducts(data); })
+      .catch(() => {}) // erro já logado no service
+      .finally(() => { if (!cancelled) setLoadingCatalog(false); });
+    return () => { cancelled = true; };
+  }, [tab, catalogProducts.length]);
 
   // ── Filtered + grouped catalog ───────────────────────────────────────────────
   const filteredCatalog = catalogProducts.filter(p => {

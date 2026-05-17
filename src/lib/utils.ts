@@ -20,7 +20,12 @@ export function formatDate(dateInput: any) {
   if (dateInput instanceof Date) {
     date = dateInput;
   } else if (typeof dateInput === 'string') {
-    date = new Date(dateInput);
+    // Bug #19: strings no formato YYYY-MM-DD (sem hora) são interpretadas como UTC midnight,
+    // causando exibição do dia anterior em timezone BRT (UTC-3).
+    // Forçar interpretação local adicionando T00:00:00 se não houver componente de hora.
+    date = /^\d{4}-\d{2}-\d{2}$/.test(dateInput)
+      ? new Date(`${dateInput}T00:00:00`)
+      : new Date(dateInput);
   } else if (dateInput && typeof dateInput.toDate === 'function') {
     // Handle Firestore Timestamp
     date = dateInput.toDate();

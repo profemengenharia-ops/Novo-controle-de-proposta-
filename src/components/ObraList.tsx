@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   HardHat, Plus, Edit3, Trash2, X, Save, MapPin, Calendar, Ruler,
@@ -75,14 +75,28 @@ export function ObraList({ client }: Props) {
   const [editing, setEditing] = useState<Obra | null>(null);
   const [showModal, setShowModal] = useState(false);
 
-  const load = async () => {
+  // Bug #21: load como useCallback para ser reutilizada em handlers sem recrear a função
+  const load = useCallback(async () => {
     setLoading(true);
-    const data = await obraService.getByClient(client.id);
-    setObras(data);
-    setLoading(false);
-  };
+    try {
+      const data = await obraService.getByClient(client.id);
+      setObras(data);
+    } catch {
+      // erro já logado no service
+    } finally {
+      setLoading(false);
+    }
+  }, [client.id]);
 
-  useEffect(() => { load(); }, [client.id]);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    obraService.getByClient(client.id)
+      .then(data => { if (!cancelled) setObras(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [client.id]);
 
   const handleNew = () => {
     setEditing(emptyObraFor(client.id));

@@ -31,7 +31,7 @@ import {
   Phone,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, formatDate, maskCNPJ, maskPhone } from '../lib/utils';
+import { cn, formatCurrency, formatDate, maskCNPJ, maskPhone, calculateBDI } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import { PriceFormationModal } from './PriceFormationModal';
 import { PricingFormulation } from './PricingFormulation';
@@ -96,74 +96,80 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
   });
 
   useEffect(() => {
-    if (proposalId) {
-      async function load() {
-        const data = await proposalService.getProposal(proposalId!);
-        if (data) {
-          // Build pre-fill overrides for empty fields
-          const preFill: Partial<Proposal> = {};
+    if (!proposalId) return;
 
-          // Fetch linked client and obra in parallel
-          const [client, obra] = await Promise.all([
-            data.clientId ? clientService.getById(data.clientId).catch(() => null) : null,
-            data.obraId   ? obraService.getById(data.obraId).catch(() => null)   : null,
-          ]);
+    // Bug #9: flag para evitar setState em componente desmontado durante load async
+    let cancelled = false;
 
-          if (client) {
-            setLinkedClient(client);
-            if (!data.clientName) preFill.clientName = client.companyName;
-          }
-          if (obra) {
-            setLinkedObra(obra);
-            if (!data.scopeTitle)  preFill.scopeTitle = obra.name;
-            if (!data.deadline && obra.deadline) preFill.deadline = obra.deadline;
-            if (obra.scopeSummary && !data.technicalScope?.generalConsiderations) {
-              preFill.technicalScope = {
-                ...(data.technicalScope ?? {
-                  generalConsiderations: '',
-                  references: [],
-                  norms: [],
-                  items: [],
-                  safetyNotes: '',
-                  exclusions: [],
-                  contractorObligations: [],
-                  contracteeObligations: [],
-                }),
-                generalConsiderations: obra.scopeSummary,
-              };
-            }
-          }
+    async function load() {
+      const data = await proposalService.getProposal(proposalId!);
+      if (!data || cancelled) return;
 
-          setProposal({
-            ...data,
-            ...preFill,
-            contractDetails: data.contractDetails || {
-              contractNumber: '',
-              signingDate: '',
-              executionDeadline: ''
-            }
-          });
+      const preFill: Partial<Proposal> = {};
+      const [client, obra] = await Promise.all([
+        data.clientId ? clientService.getById(data.clientId).catch(() => null) : null,
+        data.obraId   ? obraService.getById(data.obraId).catch(() => null)   : null,
+      ]);
+      if (cancelled) return;
+
+      if (client) {
+        setLinkedClient(client);
+        if (!data.clientName) preFill.clientName = client.companyName;
+      }
+      if (obra) {
+        setLinkedObra(obra);
+        if (!data.scopeTitle)  preFill.scopeTitle = obra.name;
+        if (!data.deadline && obra.deadline) preFill.deadline = obra.deadline;
+        if (obra.scopeSummary && !data.technicalScope?.generalConsiderations) {
+          preFill.technicalScope = {
+            ...(data.technicalScope ?? {
+              generalConsiderations: '',
+              references: [],
+              norms: [],
+              items: [],
+              safetyNotes: '',
+              exclusions: [],
+              contractorObligations: [],
+              contracteeObligations: [],
+            }),
+            generalConsiderations: obra.scopeSummary,
+          };
         }
       }
-      load();
 
-      // Realtime subscription for pricing updates
-      const unsubscribe = proposalService.subscribeToProposal(proposalId, (updated) => {
-        setProposal(prev => {
-          // Only update if the status changed to 'calculado' or if there's significant data change
-          if (prev.status === ProposalStatus.DRAFT && updated.status !== ProposalStatus.DRAFT) {
-            toast.info(`Status da proposta atualizado para: ${updated.status.toUpperCase()}`);
-          }
-          return {
-            ...prev,
-            ...updated,
-            contractDetails: updated.contractDetails || prev.contractDetails
-          };
+      if (!cancelled) {
+        setProposal({
+          ...data,
+          ...preFill,
+          contractDetails: data.contractDetails || {
+            contractNumber: '',
+            signingDate: '',
+            executionDeadline: '',
+          },
         });
-      });
-
-      return () => unsubscribe();
+      }
     }
+    load();
+
+    // Realtime subscription for pricing updates
+    const unsubscribe = proposalService.subscribeToProposal(proposalId, (updated) => {
+      if (cancelled) return;
+      setProposal(prev => {
+        if (prev.status === ProposalStatus.DRAFT && updated.status !== ProposalStatus.DRAFT) {
+          toast.info(`Status da proposta atualizado para: ${updated.status.toUpperCase()}`);
+        }
+        return {
+          ...prev,
+          ...updated,
+          contractDetails: updated.contractDetails || prev.contractDetails,
+        };
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [proposalId]);
 
   // ── Pre-fill from obra (Inbox "Assumir" flow) ─────────────────────────────
@@ -276,8 +282,10 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
     } catch (e) {
       console.error(e);
       toast.error('Erro ao salvar proposta. Tente novamente.');
+    } finally {
+      // Bug #22: movido para finally para garantir que loading seja resetado mesmo em erro duplo
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const [pricingInsight, setPricingInsight] = useState<string | null>(null);
@@ -287,13 +295,12 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
   const [clientDropOpen, setClientDropOpen] = useState(false);
   const [clientObras, setClientObras] = useState<Obra[]>([]);
 
-  // Sync summaryView from loaded proposal
+  // Bug #12: dependência correta — sincronizar quando o campo é carregado do DB (pode ser async)
   useEffect(() => {
     if (proposal.commercialProposal?.hideItemDetails !== undefined) {
       setSummaryView(proposal.commercialProposal.hideItemDetails);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proposalId]);
+  }, [proposal.commercialProposal?.hideItemDetails]);
 
   useEffect(() => {
     clientService.getAll().then(setAllClients).catch(() => {});
@@ -305,8 +312,10 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
     setClientDropOpen(false);
     setProposal(prev => ({ ...prev, clientName: client.companyName, clientId: client.id }));
     try {
-      const all = await obraService.getAll();
-      setClientObras(all.filter(o => o.clientId === client.id));
+      // Bug #13: getAll() carregava TODAS as obras para filtrar no front — N+1 query.
+      // getByClient() faz a query filtrada direto no banco.
+      const obras = await obraService.getByClient(client.id);
+      setClientObras(obras);
     } catch {
       setClientObras([]);
     }
@@ -374,6 +383,11 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
 
     setAiLoading(true);
     const reader = new FileReader();
+    // Bug #11: sem onerror o spinner travava indefinidamente em arquivo corrompido
+    reader.onerror = () => {
+      setAiLoading(false);
+      toast.error('Não foi possível ler o arquivo. Verifique se está corrompido.');
+    };
     reader.onload = async (evt) => {
       const bstr = evt.target?.result;
       const wb = XLSX.read(bstr, { type: 'array' });
@@ -413,24 +427,36 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
   };
 
   const handleBudgetSelect = (project: BudgetProject) => {
-    // Import items from all stages
-    const importedItems: CommercialItem[] = project.stages.flatMap(stage => 
-      stage.items.map(item => ({
-        id: crypto.randomUUID(),
-        description: `[${stage.name}] ${item.description}`,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitPrice: item.unitCost * (1 + (project.bdi.calculatedBDI / 100)), // Apply BDI
-        totalPrice: 0, // Will be calculated below
-        source: 'engineering'
-      }))
-    );
+    // Bug #10: se calculatedBDI for 0 (projeto recém-criado sem recalcular),
+    // os itens importavam sem margem. Recalculamos usando os campos de configuração do BDI.
+    const bdiPercent =
+      project.bdi.calculatedBDI > 0
+        ? project.bdi.calculatedBDI
+        : calculateBDI({
+            ac: project.bdi.centralAdmin,
+            sg: project.bdi.insuranceAndGuarantees,
+            r:  project.bdi.risks,
+            df: project.bdi.financialExpenses,
+            l:  project.bdi.profit,
+            i:  project.bdi.taxes,
+          }) * 100; // calculateBDI retorna decimal (ex: 0.2479), converter para %
 
-    // Calculate total price for each imported item
-    const finalizedItems = importedItems.map(item => ({
-      ...item,
-      totalPrice: item.quantity * item.unitPrice
-    }));
+    const bdiMultiplier = 1 + bdiPercent / 100;
+
+    const finalizedItems: CommercialItem[] = project.stages.flatMap(stage =>
+      stage.items.map(item => {
+        const unitPrice = item.unitCost * bdiMultiplier;
+        return {
+          id: crypto.randomUUID(),
+          description: `[${stage.name}] ${item.description}`,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPrice,
+          totalPrice: item.quantity * unitPrice,
+          source: 'engineering' as const,
+        };
+      })
+    );
 
     updateCommercial('items', [...(proposal.commercialProposal?.items || []), ...finalizedItems]);
     setShowBudgetSelector(false);

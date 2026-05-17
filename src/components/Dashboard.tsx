@@ -25,12 +25,20 @@ export function Dashboard({ setActiveTab, onShowRadar }: DashboardProps) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Bug #6: flag de cleanup evita setState em componente desmontado
+    let cancelled = false;
     async function load() {
-      const data = await proposalService.getAllProposals();
-      setProposals(data);
-      setLoading(false);
+      try {
+        const data = await proposalService.getAllProposals();
+        if (!cancelled) setProposals(data);
+      } catch {
+        // erro já logado no service; não travar o loading
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
     load();
+    return () => { cancelled = true; };
   }, []);
 
   const stats = [
@@ -188,7 +196,15 @@ export function Dashboard({ setActiveTab, onShowRadar }: DashboardProps) {
                       <div className="w-1 h-8 bg-orange-500 rounded-full" />
                       <div>
                         <p className="text-sm font-semibold">{p.clientName}</p>
-                        <p className="text-[10px] opacity-50 uppercase">{p.proposalNumber} • Vence em 12 dias</p>
+                        <p className="text-[10px] opacity-50 uppercase">
+                          {p.proposalNumber} • {(() => {
+                            // Bug #7: calcular dias restantes reais em vez de hardcoded "12 dias"
+                            const created = new Date(p.createdAt);
+                            const expires = new Date(created.getTime() + (p.validityDays ?? 30) * 86_400_000);
+                            const remaining = Math.ceil((expires.getTime() - Date.now()) / 86_400_000);
+                            return remaining > 0 ? `Vence em ${remaining} dia${remaining !== 1 ? 's' : ''}` : 'Validade expirada';
+                          })()}
+                        </p>
                       </div>
                     </div>
                     <button className="opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-black/5 rounded-md">

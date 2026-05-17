@@ -58,26 +58,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Flag para evitar setState em componente desmontado
+    let mounted = true;
+
     // ── Sessão inicial ───────────────────────────────────────────────────────
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        // Valida domínio na sessão restaurada (cookie / localStorage)
-        if (!isAllowedEmail(session.user.email)) {
-          supabase.auth.signOut();
-          setUser(null);
+    // Bug #3: sem .catch() o app travava em loading eterno se Supabase falhasse
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        if (!mounted) return;
+        if (session?.user) {
+          if (!isAllowedEmail(session.user.email)) {
+            supabase.auth.signOut();
+            setUser(null);
+          } else {
+            setUser(session.user);
+          }
         } else {
-          setUser(session.user);
+          setUser(null);
         }
-      } else {
-        setUser(null);
-      }
-      setLoading(false);
-    });
+      })
+      .catch(() => {
+        if (mounted) setUser(null);
+      })
+      .finally(() => {
+        // Bug #4: setLoading(false) garantido mesmo com erro de rede
+        if (mounted) setLoading(false);
+      });
 
     // ── Listener de mudanças de auth ─────────────────────────────────────────
+    // Bug #4: onAuthStateChange não seta loading para evitar race condition
+    // com getSession — quem chama primeiro define o estado final
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return;
       if (session?.user) {
         if (!isAllowedEmail(session.user.email)) {
           // Autenticou, mas domínio não permitido → rejeitar e expulsar
@@ -93,11 +107,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setUser(null);
       }
+      // loading é resolvido pelo finally do getSession; aqui apenas paramos o spinner de login
       setLoading(false);
       setSignInLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = useCallback(async () => {

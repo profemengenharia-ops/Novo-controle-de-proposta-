@@ -30,6 +30,7 @@ function AppContent() {
   const [publicId, setPublicId] = useState('');
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [showRadar, setShowRadar] = useState(false);
+  const [showManualModal, setShowManualModal] = useState(false);
 
   useEffect(() => {
     const path = window.location.pathname;
@@ -41,7 +42,8 @@ function AppContent() {
 
   useEffect(() => {
     if (user) {
-      proposalService.getAllProposals().then(setProposals);
+      // Bug #1: sem catch a Promise rejeitada ficava silenciosa
+      proposalService.getAllProposals().then(setProposals).catch(() => {});
       
       const lastRadar = localStorage.getItem('lastRadarShow');
       const today = new Date().toDateString();
@@ -75,17 +77,20 @@ function AppContent() {
     );
   }
 
+  // Bug #2: interceptar 'manual-proposal' para abrir modal sem remontar o Dashboard
+  const handleSetActiveTab = (tab: string) => {
+    if (tab === 'manual-proposal') {
+      setShowManualModal(true);
+      return;
+    }
+    setActiveTab(tab);
+  };
+
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <Dashboard setActiveTab={setActiveTab} onShowRadar={() => setShowRadar(true)} />;
+      case 'dashboard': return <Dashboard setActiveTab={handleSetActiveTab} onShowRadar={() => setShowRadar(true)} />;
       case 'proposals': return <ProposalManager />;
       case 'new-proposal': return <ProposalWizard onComplete={() => setActiveTab('proposals')} />;
-      case 'manual-proposal': return (
-        <React.Fragment>
-          <Dashboard setActiveTab={setActiveTab} onShowRadar={() => setShowRadar(true)} />
-          <ManualProposalModal onClose={() => setActiveTab('dashboard')} onComplete={() => setActiveTab('proposals')} />
-        </React.Fragment>
-      );
       case 'commercial': return (
         <CommercialHub
           onOpenProposal={(proposalId) => setActiveTab(`edit-${proposalId}`)}
@@ -98,22 +103,30 @@ function AppContent() {
       );
       case 'norms': return <NormsManager />;
       case 'reports': return <Reports />;
-      default: 
+      default:
         if (activeTab.startsWith('edit-')) {
           return <ProposalWizard proposalId={activeTab.replace('edit-', '')} onComplete={() => setActiveTab('proposals')} />;
         }
-        return <Dashboard setActiveTab={setActiveTab} onShowRadar={() => setShowRadar(true)} />;
+        return <Dashboard setActiveTab={handleSetActiveTab} onShowRadar={() => setShowRadar(true)} />;
     }
   };
 
   return (
-    <Layout activeTab={activeTab.includes('new-proposal') || activeTab.startsWith('edit-') ? 'proposals' : activeTab} setActiveTab={setActiveTab}>
+    <Layout activeTab={activeTab.includes('new-proposal') || activeTab.startsWith('edit-') ? 'proposals' : activeTab} setActiveTab={handleSetActiveTab}>
       {renderContent()}
-      
+
+      {/* Bug #2: ManualProposalModal fora de renderContent — não remonta o Dashboard */}
+      {showManualModal && (
+        <ManualProposalModal
+          onClose={() => setShowManualModal(false)}
+          onComplete={() => { setShowManualModal(false); setActiveTab('proposals'); }}
+        />
+      )}
+
       {showRadar && (
-        <DailyBriefing 
-          proposals={proposals} 
-          onClose={() => setShowRadar(false)} 
+        <DailyBriefing
+          proposals={proposals}
+          onClose={() => setShowRadar(false)}
           onAction={(id) => {
             setActiveTab(`edit-${id}`);
             setShowRadar(false);
