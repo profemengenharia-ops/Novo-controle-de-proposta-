@@ -23,7 +23,7 @@ import { cn, formatCurrency, formatDate } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import { CommercialItem } from '../types';
 
-import { ProposalPrintView } from './ProposalPrintView';
+import { ProposalPremiumView } from './ProposalPremiumView';
 import { BudgetSelector } from './BudgetSelector';
 import { BudgetProject } from '../types';
 import { normsService, Norm, Block } from '../services/normsService';
@@ -400,7 +400,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
         <div className="lg:col-span-3 space-y-8">
           {showPreview ? (
             <div className="animate-in fade-in zoom-in-95 duration-500">
-               <ProposalPrintView proposal={proposal as Proposal} />
+               <ProposalPremiumView proposal={proposal as Proposal} />
             </div>
           ) : (
             <React.Fragment>
