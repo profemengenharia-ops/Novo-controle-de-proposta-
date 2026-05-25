@@ -143,7 +143,7 @@ function HDoc({ children }: { children: React.ReactNode }) {
 
 function HSec({ num, children }: { num: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '17px 0 9px', fontWeight: 700, fontSize: '10.5pt', color: C.ink }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '17px 0 9px', fontWeight: 700, fontSize: '13pt', color: C.ink }}>
       <span style={{ width: 4, height: 16, background: C.brand, borderRadius: 1, flex: '0 0 auto' }} />
       <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: '8.5pt', color: C.brand, letterSpacing: '.02em' }}>{num}</span>
       {children}
@@ -154,15 +154,15 @@ function HSec({ num, children }: { num: string; children: React.ReactNode }) {
 
 function HSub({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontWeight: 700, fontSize: '9.4pt', color: C.ink2, margin: '13px 0 6px', display: 'flex', alignItems: 'center', gap: 7 }}>
+    <div style={{ fontWeight: 700, fontSize: '12pt', color: C.ink2, margin: '13px 0 6px', display: 'flex', alignItems: 'center', gap: 7 }}>
       <span style={{ width: 4, height: 11, background: C.brand, borderRadius: 1, flex: '0 0 auto' }} />
       {children}
     </div>
   );
 }
 
-const leadStyle: React.CSSProperties = { fontSize: '9pt', color: C.ink2, margin: '0 0 8px', lineHeight: 1.5, textAlign: 'justify' };
-const ulStyle: React.CSSProperties = { fontSize: '8.4pt', color: C.ink2, paddingLeft: 18, margin: '4px 0 10px', lineHeight: 1.55 };
+const leadStyle: React.CSSProperties = { fontSize: '11pt', color: C.ink2, margin: '0 0 8px', lineHeight: 1.5, textAlign: 'justify' };
+const ulStyle: React.CSSProperties = { fontSize: '11pt', color: C.ink2, paddingLeft: 18, margin: '4px 0 10px', lineHeight: 1.55 };
 
 // ══════════════════════════════════════════════════════════════════════════════
 export function ProposalPremiumView({ proposal }: Props) {
@@ -197,8 +197,8 @@ export function ProposalPremiumView({ proposal }: Props) {
 
   const addr = ['Profem Soluções Contra Incêndio · Rua Esmeralda, 120 — Colina da Serra · Cabreúva/SP · 13318-000', 'comercial@profemsolucoes.com.br · +55 11 4529-3379'];
 
-  const thStyle: React.CSSProperties = { background: C.brand, color: '#fff', textAlign: 'left', fontWeight: 600, fontSize: '7.4pt', letterSpacing: '.04em', textTransform: 'uppercase', padding: '6px 9px' };
-  const tdStyle: React.CSSProperties = { padding: '5.5px 9px', borderBottom: `.6px solid ${C.line}`, color: C.ink2, verticalAlign: 'top', fontSize: '8.4pt' };
+  const thStyle: React.CSSProperties = { background: C.brand, color: '#fff', textAlign: 'left', fontWeight: 600, fontSize: '9pt', letterSpacing: '.04em', textTransform: 'uppercase', padding: '6px 9px' };
+  const tdStyle: React.CSSProperties = { padding: '5.5px 9px', borderBottom: `.6px solid ${C.line}`, color: C.ink2, verticalAlign: 'top', fontSize: '11pt' };
 
   return (
     <div>
@@ -257,7 +257,7 @@ export function ProposalPremiumView({ proposal }: Props) {
           <HDoc>Proposta Técnica</HDoc>
 
           <HSec num="01">Considerações Gerais</HSec>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8.6pt' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11pt' }}>
             <tbody>
               {([
                 ['Proponente', 'Profem Soluções Contra Incêndio'],
@@ -293,7 +293,7 @@ export function ProposalPremiumView({ proposal }: Props) {
             <tbody>
               {norms.map(([code, app], i) => (
                 <tr key={i} style={{ background: i % 2 ? C.paper2 : C.paper }}>
-                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '8pt' }}>{code}</td>
+                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '11pt' }}>{code}</td>
                   <td style={tdStyle}>{app}</td>
                 </tr>
               ))}
@@ -309,11 +309,11 @@ export function ProposalPremiumView({ proposal }: Props) {
           <div style={{ display: 'flex', gap: 14 }}>
             <div style={{ flex: 1 }}>
               <HSub>Contratada — Profem</HSub>
-              <ul style={{ ...ulStyle, fontSize: '8.2pt', paddingLeft: 16 }}>{contractor.map((o, i) => <li key={i}>{o}</li>)}</ul>
+              <ul style={{ ...ulStyle, fontSize: '11pt', paddingLeft: 16 }}>{contractor.map((o, i) => <li key={i}>{o}</li>)}</ul>
             </div>
             <div style={{ flex: 1 }}>
               <HSub>Contratante</HSub>
-              <ul style={{ ...ulStyle, fontSize: '8.2pt', paddingLeft: 16 }}>{contractee.map((o, i) => <li key={i}>{o}</li>)}</ul>
+              <ul style={{ ...ulStyle, fontSize: '11pt', paddingLeft: 16 }}>{contractee.map((o, i) => <li key={i}>{o}</li>)}</ul>
             </div>
           </div>
           <Foot left={addr} pageInfo={`${proposalNumber} · Pág. 02/03`} />
@@ -341,11 +341,11 @@ export function ProposalPremiumView({ proposal }: Props) {
                 : DEFAULT_ITEMS.map((desc, i) => [String(i + 1).padStart(2, '0'), desc, '1', 'R$ —', 'R$ —'])
               ).map((row, i) => (
                 <tr key={i} style={{ background: i % 2 ? C.paper2 : C.paper }}>
-                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '8pt' }}>{row[0]}</td>
+                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '11pt' }}>{row[0]}</td>
                   <td style={tdStyle}>{row[1]}</td>
-                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '8pt', textAlign: 'center' }}>{row[2]}</td>
-                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '8pt', textAlign: 'right' }}>{row[3]}</td>
-                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '8pt', textAlign: 'right' }}>{row[4]}</td>
+                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '11pt', textAlign: 'center' }}>{row[2]}</td>
+                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '11pt', textAlign: 'right' }}>{row[3]}</td>
+                  <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '11pt', textAlign: 'right' }}>{row[4]}</td>
                 </tr>
               ))}
             </tbody>
@@ -357,7 +357,7 @@ export function ProposalPremiumView({ proposal }: Props) {
             <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: '15pt', color: C.brand }}>{formatCurrency(com.totalValue || 0)}</span>
           </div>
 
-          <div style={{ borderRadius: 3, padding: '11px 14px', margin: '10px 0', fontSize: '8.6pt', border: `.6px solid ${C.warnBorder}`, background: C.warnBg, color: C.warnText }}>
+          <div style={{ borderRadius: 3, padding: '11px 14px', margin: '10px 0', fontSize: '11pt', border: `.6px solid ${C.warnBorder}`, background: C.warnBg, color: C.warnText }}>
             <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: '6.6pt', letterSpacing: '.1em', textTransform: 'uppercase', display: 'block', marginBottom: 3, color: C.warn }}>Itens não inclusos</span>
             Plataformas elevatórias e andaimes para trabalhos em altura deverão ser fornecidos pela Contratante e <strong style={{ color: C.warn }}>não estão inclusos</strong> no valor acima.
           </div>
@@ -372,7 +372,7 @@ export function ProposalPremiumView({ proposal }: Props) {
             ] as [string, string][]).map(([k, v], i, arr) => (
               <div key={i} style={{ flex: 1, padding: '11px 13px', borderRight: i < arr.length - 1 ? `.6px solid ${C.line}` : 0 }}>
                 <span style={{ fontFamily: MONO, fontSize: '6.4pt', letterSpacing: '.1em', color: C.brandDeep, textTransform: 'uppercase', display: 'block', marginBottom: 5 }}>{k}</span>
-                <span style={{ fontSize: '8.4pt', color: C.ink2 }}>{v}</span>
+                <span style={{ fontSize: '11pt', color: C.ink2 }}>{v}</span>
               </div>
             ))}
           </div>
@@ -383,14 +383,14 @@ export function ProposalPremiumView({ proposal }: Props) {
           <div style={{ display: 'flex', gap: 46, marginTop: 30 }}>
             <div style={{ flex: 1 }}>
               <div style={{ borderTop: `.8px solid ${C.ink}`, paddingTop: 6 }}>
-                <span style={{ fontWeight: 700, fontSize: '9pt', display: 'block' }}>Marcus Paulo G. Lopes</span>
+                <span style={{ fontWeight: 700, fontSize: '11pt', display: 'block' }}>Marcus Paulo G. Lopes</span>
                 <span style={{ fontSize: '7.6pt', color: C.muted }}>Engº Civil · Profem Soluções Contra Incêndio</span><br />
                 <span style={{ fontSize: '7.6pt', color: C.muted, fontFamily: MONO }}>Assinatura digital verificada</span>
               </div>
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ borderTop: `.8px solid ${C.ink}`, paddingTop: 6 }}>
-                <span style={{ fontWeight: 700, fontSize: '9pt', display: 'block' }}>Aceite do Cliente</span>
+                <span style={{ fontWeight: 700, fontSize: '11pt', display: 'block' }}>Aceite do Cliente</span>
                 <span style={{ fontSize: '7.6pt', color: C.muted }}>Responsável · [ Data ]</span>
               </div>
             </div>
