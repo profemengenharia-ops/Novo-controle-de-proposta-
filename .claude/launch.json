@@ -3,10 +3,10 @@
   "configurations": [
     {
       "name": "profem-app",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5578"],
-      "port": 5578,
-      "cwd": "C:\\Users\\Marcus\\Downloads\\profem-proposal-gen (3)"
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "C:\\Users\\Marcus\\Downloads\\profem-proposal-gen (3)",
+      "port": 5173
     }
   ]
 }
