@@ -138,3 +138,88 @@ CREATE TRIGGER update_labor_rates_updated_at
     BEFORE UPDATE ON public.labor_rates
     FOR EACH ROW
     EXECUTE PROCEDURE update_updated_at_column();
+
+-- 5. Clientes (Cadastro Comercial)
+CREATE TABLE IF NOT EXISTS public.clients (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_name TEXT NOT NULL,
+    trade_name TEXT,
+    cnpj TEXT,
+    cpf TEXT,
+    ie TEXT,
+    segment TEXT,
+    contacts JSONB DEFAULT '[]'::jsonb,
+    billing_address TEXT,
+    city TEXT,
+    state TEXT,
+    cep TEXT,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage their own clients" ON public.clients;
+CREATE POLICY "Users can manage their own clients"
+    ON public.clients FOR ALL
+    USING (auth.uid() = created_by)
+    WITH CHECK (auth.uid() = created_by);
+
+DROP TRIGGER IF EXISTS update_clients_updated_at ON public.clients;
+CREATE TRIGGER update_clients_updated_at
+    BEFORE UPDATE ON public.clients
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_updated_at_column();
+
+-- 6. Obras (Cadastro Comercial)
+CREATE TABLE IF NOT EXISTS public.obras (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT,
+    status TEXT NOT NULL DEFAULT 'prospeccao',
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    cep TEXT,
+    estimated_area NUMERIC(12, 2),
+    start_date DATE,
+    deadline DATE,
+    scope_summary TEXT,
+    attachments JSONB DEFAULT '[]'::jsonb,
+    notes TEXT,
+    budget_project_id UUID REFERENCES public.budget_projects(id) ON DELETE SET NULL,
+    proposal_id UUID REFERENCES public.proposals(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+ALTER TABLE public.obras ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage their own obras" ON public.obras;
+CREATE POLICY "Users can manage their own obras"
+    ON public.obras FOR ALL
+    USING (auth.uid() = created_by)
+    WITH CHECK (auth.uid() = created_by);
+
+DROP TRIGGER IF EXISTS update_obras_updated_at ON public.obras;
+CREATE TRIGGER update_obras_updated_at
+    BEFORE UPDATE ON public.obras
+    FOR EACH ROW
+    EXECUTE PROCEDURE update_updated_at_column();
+
+-- 7. Vínculos do pipeline Comercial → Orçamento → Proposta
+ALTER TABLE public.proposals
+    ADD COLUMN IF NOT EXISTS deadline TEXT,
+    ADD COLUMN IF NOT EXISTS loss_reason TEXT,
+    ADD COLUMN IF NOT EXISTS interactions JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES public.clients(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS obra_id UUID REFERENCES public.obras(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS budget_project_id UUID REFERENCES public.budget_projects(id) ON DELETE SET NULL;
+
+ALTER TABLE public.budget_projects
+    ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES public.clients(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS obra_id UUID REFERENCES public.obras(id) ON DELETE SET NULL;
