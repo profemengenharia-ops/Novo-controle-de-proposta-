@@ -139,7 +139,7 @@ function sans(
     text,
     font: SANS,
     color: opts.color ?? INK2,
-    size: opts.size ?? 19,
+    size: opts.size ?? 22,
     bold: opts.bold ?? false,
     italics: opts.italics ?? false,
   });
@@ -155,7 +155,7 @@ function lead(text: string, opts: { after?: number } = {}) {
   return new Paragraph({
     alignment: AlignmentType.JUSTIFIED,
     spacing: { after: opts.after ?? 140, line: 264 },
-    children: [sans(text, { size: 18 })],
+    children: [sans(text, { size: 22 })],
   });
 }
 
@@ -191,8 +191,8 @@ function hSec(num: string, title: string) {
     border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE, space: 4 } },
     children: [
       bar(),
-      new TextRun({ text: '  ' + num + '  ', font: MONO, color: BRAND, bold: true, size: 17, characterSpacing: 18 }),
-      new TextRun({ text: title, font: SANS, bold: true, size: 21, color: INK }),
+      new TextRun({ text: '  ' + num + '  ', font: MONO, color: BRAND, bold: true, size: 18, characterSpacing: 18 }),
+      new TextRun({ text: title, font: SANS, bold: true, size: 26, color: INK }),
     ],
   });
 }
@@ -200,7 +200,7 @@ function hSec(num: string, title: string) {
 function hSub(title: string) {
   return new Paragraph({
     spacing: { before: 180, after: 80 },
-    children: [bar(), new TextRun({ text: '  ' + title, font: SANS, bold: true, size: 19, color: INK2 })],
+    children: [bar(), new TextRun({ text: '  ' + title, font: SANS, bold: true, size: 24, color: INK2 })],
   });
 }
 
@@ -208,7 +208,7 @@ function listItem(text: string) {
   return new Paragraph({
     spacing: { after: 50, line: 252 },
     indent: { left: 260, hanging: 160 },
-    children: [new TextRun({ text: '•  ', color: BRAND, bold: true, size: 17 }), sans(text, { size: 17 })],
+    children: [new TextRun({ text: '•  ', color: BRAND, bold: true, size: 22 }), sans(text, { size: 22 })],
   });
 }
 
@@ -226,12 +226,12 @@ function kvTable(rows: [string, string][]) {
             new TableCell({
               width: { size: 40, type: WidthType.PERCENTAGE },
               margins: { top: 70, bottom: 70, left: 0, right: 120 },
-              children: [new Paragraph({ children: [sans(k, { color: MUTED, size: 17 })] })],
+              children: [new Paragraph({ children: [sans(k, { color: MUTED, size: 22 })] })],
             }),
             new TableCell({
               width: { size: 60, type: WidthType.PERCENTAGE },
               margins: { top: 70, bottom: 70, left: 0, right: 0 },
-              children: [new Paragraph({ children: [sans(v, { color: INK, bold: true, size: 17 })] })],
+              children: [new Paragraph({ children: [sans(v, { color: INK, bold: true, size: 22 })] })],
             }),
           ],
         }),
@@ -245,7 +245,7 @@ function normsTable(norms: [string, string][]) {
     new TableCell({
       shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
       margins: { top: 70, bottom: 70, left: 140, right: 140 },
-      children: [new Paragraph({ children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 15, characterSpacing: 8 })] })],
+      children: [new Paragraph({ children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
     });
 
   return new Table({
@@ -265,12 +265,12 @@ function normsTable(norms: [string, string][]) {
               new TableCell({
                 shading: i % 2 ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
                 margins: { top: 65, bottom: 65, left: 140, right: 140 },
-                children: [new Paragraph({ children: [mono(code, { color: INK2, size: 16 })] })],
+                children: [new Paragraph({ children: [mono(code, { color: INK2, size: 22 })] })],
               }),
               new TableCell({
                 shading: i % 2 ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
                 margins: { top: 65, bottom: 65, left: 140, right: 140 },
-                children: [new Paragraph({ children: [sans(app, { color: INK2, size: 17 })] })],
+                children: [new Paragraph({ children: [sans(app, { color: INK2, size: 22 })] })],
               }),
             ],
           }),
@@ -290,7 +290,7 @@ function valuesTable(proposal: Proposal) {
     new TableCell({
       shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
       margins: { top: 65, bottom: 65, left: 140, right: 140 },
-      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 15, characterSpacing: 8 })] })],
+      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
     });
 
   const td = (text: string, align: Align, opts: { mono?: boolean; bold?: boolean; zebra?: boolean } = {}) =>
@@ -301,7 +301,7 @@ function valuesTable(proposal: Proposal) {
       children: [
         new Paragraph({
           alignment: align,
-          children: [opts.mono ? mono(text, { color: INK2, size: 16, bold: opts.bold }) : sans(text, { color: INK2, size: 17, bold: opts.bold })],
+          children: [opts.mono ? mono(text, { color: INK2, size: 22, bold: opts.bold }) : sans(text, { color: INK2, size: 22, bold: opts.bold })],
         }),
       ],
     });
@@ -403,7 +403,7 @@ function termsCard(cells: [string, string][]) {
               margins: { top: 120, bottom: 120, left: 150, right: 150 },
               children: [
                 new Paragraph({ spacing: { after: 60 }, children: [mono(k, { color: BRAND_DEEP, size: 13, caps: true })] }),
-                new Paragraph({ children: [sans(v, { color: INK2, size: 16 })] }),
+                new Paragraph({ children: [sans(v, { color: INK2, size: 22 })] }),
               ],
             }),
         ),
@@ -429,9 +429,9 @@ function warnCallout() {
               new Paragraph({ spacing: { after: 50 }, children: [mono('Itens não inclusos', { color: WARN, size: 13, bold: true, caps: true })] }),
               new Paragraph({
                 children: [
-                  sans('Plataformas elevatórias e andaimes para trabalhos em altura deverão ser fornecidos pela Contratante e ', { color: WARN_TEXT, size: 17 }),
-                  sans('não estão inclusos', { color: WARN, size: 17, bold: true }),
-                  sans(' no valor acima.', { color: WARN_TEXT, size: 17 }),
+                  sans('Plataformas elevatórias e andaimes para trabalhos em altura deverão ser fornecidos pela Contratante e ', { color: WARN_TEXT, size: 22 }),
+                  sans('não estão inclusos', { color: WARN, size: 22, bold: true }),
+                  sans(' no valor acima.', { color: WARN_TEXT, size: 22 }),
                 ],
               }),
             ],
@@ -467,12 +467,12 @@ function signBlock() {
       new TableRow({
         children: [
           cell([
-            { text: 'Marcus Paulo G. Lopes', bold: true, color: INK, size: 18 },
+            { text: 'Marcus Paulo G. Lopes', bold: true, color: INK, size: 22 },
             { text: 'Engº Civil · Profem Soluções Contra Incêndio', color: MUTED, size: 15 },
             { text: 'Assinatura digital verificada', mono: true, color: MUTED, size: 14 },
           ]),
           cell([
-            { text: 'Aceite do Cliente', bold: true, color: INK, size: 18 },
+            { text: 'Aceite do Cliente', bold: true, color: INK, size: 22 },
             { text: 'Responsável · [ Data ]', color: MUTED, size: 15 },
           ]),
         ],
@@ -785,7 +785,7 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
   const doc = new Document({
     creator: 'ProFem Soluções Contra Incêndio',
     title: `Proposta ${proposal.proposalNumber}`,
-    styles: { default: { document: { run: { font: SANS, size: 19, color: INK2 } } } },
+    styles: { default: { document: { run: { font: SANS, size: 22, color: INK2 } } } },
     sections: [
       {
         properties: {
