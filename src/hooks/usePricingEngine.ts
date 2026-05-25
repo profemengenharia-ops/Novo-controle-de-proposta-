@@ -51,6 +51,9 @@ export const usePricingEngine = (items: PricingItem[], settings: PricingSettings
     const markup = totalCost > 0 ? suggestedPrice / totalCost : 0;
     const realMarginPercent = suggestedPrice > 0 ? (netProfit / suggestedPrice) * 100 : 0;
 
+    // BDI calculado (% de acréscimo sobre o custo total)
+    const calculatedBDI = totalCost > 0 ? (markup - 1) * 100 : 0;
+
     return {
       directCost,
       indirectCosts: settings.indirectCosts,
@@ -61,6 +64,10 @@ export const usePricingEngine = (items: PricingItem[], settings: PricingSettings
       netProfit,
       markup: markup.toFixed(2),
       realMarginPercent: realMarginPercent.toFixed(2),
+      // Taxas usadas (eco das settings, úteis para exibição)
+      taxRate: settings.taxRate,
+      adminOverhead: settings.adminOverhead,
+      calculatedBDI,
       // Alerta de saúde financeira
       status: realMarginPercent < 5 ? 'CRITICAL' : realMarginPercent < 15 ? 'WARNING' : 'HEALTHY'
     };

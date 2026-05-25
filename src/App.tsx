@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ConfirmProvider } from './components/ConfirmDialog';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { ProposalList } from './components/ProposalList';
@@ -142,7 +143,9 @@ export default function App() {
     <ErrorBoundary>
       <Toaster position="top-right" expand={false} richColors />
       <AuthProvider>
-        <AppContent />
+        <ConfirmProvider>
+          <AppContent />
+        </ConfirmProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

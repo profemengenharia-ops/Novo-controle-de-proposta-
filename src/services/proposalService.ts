@@ -1,5 +1,5 @@
 import { supabase, isMockMode } from '../lib/supabase';
-import { Proposal, ProposalStatus, CommercialProposal, TechnicalScope } from '../types';
+import { Proposal, ProposalStatus, CommercialProposal, TechnicalScope, ProposalRevision } from '../types';
 
 const TABLE_NAME = 'proposals';
 
@@ -160,10 +160,12 @@ export const proposalService = {
     let finalUpdates = { ...updates };
 
     if (revisionNote) {
-      const newRevisionEntry = {
-        note: revisionNote,
-        revision: updates.revision ?? '00',
-        timestamp: now(),
+      const newRevisionEntry: ProposalRevision = {
+        id: crypto.randomUUID(),
+        revisionNumber: updates.revision ?? '00',
+        createdAt: now(),
+        changes: revisionNote,
+        snapshot: {},
       };
       // Concatena ao array existente de revisions (que pode vir nos updates ou ser buscado do DB)
       finalUpdates.revisions = [

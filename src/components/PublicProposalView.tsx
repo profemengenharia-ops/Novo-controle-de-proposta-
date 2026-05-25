@@ -12,13 +12,17 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { toast } from 'sonner';
 import { STATUS_TAGS } from '../constants';
+import { useConfirm, usePrompt } from './ConfirmDialog';
 
 interface PublicViewProps {
   id: string;
 }
 
 export function PublicProposalView({ id }: PublicViewProps) {
+  const confirm = useConfirm();
+  const prompt = usePrompt();
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [loading, setLoading] = useState(true);
   const [approvedTech, setApprovedTech] = useState(false);
@@ -53,23 +57,34 @@ export function PublicProposalView({ id }: PublicViewProps) {
 
   const handleFinalApproval = async () => {
     if (!approvedTech || !approvedComm) return;
-    
-    const clientSignature = prompt('Para finalizar a aprovação, digite seu nome completo como assinatura:');
+
+    const clientSignature = await prompt({
+      title: 'Assinatura de aprovação',
+      message: 'Para finalizar a aprovação, digite seu nome completo como assinatura.',
+      label: 'Nome completo',
+      placeholder: 'Seu nome completo',
+      confirmLabel: 'Continuar',
+    });
     if (!clientSignature || clientSignature.length < 5) {
-      alert('A assinatura é obrigatória para aprovação (mínimo 5 caracteres).');
+      if (clientSignature !== null) {
+        toast.error('A assinatura é obrigatória para aprovação (mínimo 5 caracteres).');
+      }
       return;
     }
 
-    if (!confirm(`Confirma a aprovação da proposta ${proposal.proposalNumber} por ${clientSignature}?`)) {
-      return;
-    }
+    const ok = await confirm({
+      title: 'Confirmar aprovação',
+      message: <>Confirma a aprovação da proposta <b>{proposal.proposalNumber}</b> por <b>{clientSignature}</b>?</>,
+      confirmLabel: 'Aprovar proposta',
+    });
+    if (!ok) return;
 
-    await proposalService.updateProposal(id, { 
+    await proposalService.updateProposal(id, {
       status: ProposalStatus.WON,
     });
-    
+
     setProposal(prev => prev ? { ...prev, status: ProposalStatus.WON } : null);
-    alert('Proposta aprovada com sucesso!');
+    toast.success('Proposta aprovada com sucesso!');
   };
 
   return (

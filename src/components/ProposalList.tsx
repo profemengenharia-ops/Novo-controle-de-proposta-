@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { proposalService } from '../services/proposalService';
 import { obraService } from '../services/obraService';
 import { useAuth } from '../hooks/useAuth';
-import { Proposal, ProposalStatus, ProposalInteraction } from '../types';
+import { Proposal, ProposalStatus, ProposalInteraction, ObraStatus } from '../types';
 import { 
   Search, 
   Filter, 
@@ -31,7 +31,10 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatDate, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { toast } from 'sonner';
 import { STATUS_TAGS } from '../constants';
+import { useConfirm } from './ConfirmDialog';
+import { ProposalPrintView } from './ProposalPrintView';
 
 interface ProposalListProps {
   onEdit: (id: string) => void;
@@ -39,6 +42,7 @@ interface ProposalListProps {
 
 export function ProposalList({ onEdit }: ProposalListProps) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [filter, setFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<ProposalStatus | 'all'>('all');
@@ -48,6 +52,9 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   const [activeActionsMenu, setActiveActionsMenu] = useState<string | null>(null);
   const [lossReasonProposalId, setLossReasonProposalId] = useState<string | null>(null);
   const [lossReason, setLossReason] = useState('');
+  const [pdfProposal, setPdfProposal] = useState<Proposal | null>(null);
+  const [followUpId, setFollowUpId] = useState<string | null>(null);
+  const [followUpValue, setFollowUpValue] = useState('');
   const [activeTab, setActiveTab] = useState<Record<string, 'overview' | 'technical' | 'commercial' | 'history'>>({});
 
   const setProposalTab = (id: string, tab: 'overview' | 'technical' | 'commercial' | 'history') => {
@@ -72,10 +79,16 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   });
 
   const handleDelete = async (id: string) => {
-    if (confirm('Deseja realmente excluir esta proposta?')) {
-      await proposalService.deleteProposal(id);
-      setProposals(proposals.filter(p => p.id !== id));
-    }
+    const ok = await confirm({
+      title: 'Excluir proposta',
+      message: 'Deseja realmente excluir esta proposta? Esta ação não pode ser desfeita.',
+      confirmLabel: 'Excluir',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    await proposalService.deleteProposal(id);
+    setProposals(proposals.filter(p => p.id !== id));
+    toast.success('Proposta excluída');
   };
 
   const isOverdue = (date?: string) => {
@@ -118,7 +131,19 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     if (createdProposal) {
       setProposals([createdProposal, ...proposals]);
     }
-    alert(`Revisão ${nextRev} gerada com sucesso!`);
+    toast.success(`Revisão ${nextRev} gerada com sucesso!`);
+  };
+
+  // Mapeia o status da Proposta para o status equivalente da Obra vinculada.
+  const obraStatusForProposal = (s: ProposalStatus): ObraStatus | null => {
+    switch (s) {
+      case ProposalStatus.DRAFT:       return 'em_proposta';
+      case ProposalStatus.SENT:        return 'proposta_enviada';
+      case ProposalStatus.NEGOTIATING: return 'proposta_enviada';
+      case ProposalStatus.WON:         return 'ganha';
+      case ProposalStatus.LOST:        return 'perdida';
+      default:                         return null; // EXPIRED → sem equivalente
+    }
   };
 
   const handleStatusUpdate = async (id: string, newStatus: ProposalStatus) => {
@@ -130,12 +155,22 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     const p = proposals.find(p => p.id === id);
     if (p) {
       await proposalService.updateProposal(id, { status: newStatus });
+      // Sincroniza a Obra vinculada
+      const obraStatus = obraStatusForProposal(newStatus);
+      if (p.obraId && obraStatus) {
+        await obraService.update(p.obraId, { status: obraStatus });
+      }
       setProposals(proposals.map(item => item.id === id ? { ...item, status: newStatus } : item));
     }
   };
 
   const handleMarkReadyForCommercial = async (p: Proposal) => {
-    if (!confirm(`Marcar proposta "${p.proposalNumber}" como pronta para envio ao cliente?`)) return;
+    const ok = await confirm({
+      title: 'Pronta para envio',
+      message: <>Marcar a proposta <b>{p.proposalNumber}</b> como pronta para envio ao cliente?</>,
+      confirmLabel: 'Marcar como pronta',
+    });
+    if (!ok) return;
     try {
       // Atualiza status da Proposta → SENT
       await proposalService.updateProposal(p.id, { status: ProposalStatus.SENT });
@@ -146,11 +181,10 @@ export function ProposalList({ onEdit }: ProposalListProps) {
       setProposals(proposals.map(item =>
         item.id === p.id ? { ...item, status: ProposalStatus.SENT } : item
       ));
-      // Sonner não está importado aqui, usa alert simples
-      alert('Proposta marcada como pronta! O Comercial receberá a notificação na aba Comercial → Propostas Prontas.');
+      toast.success('Proposta pronta! O Comercial verá em Comercial → Propostas Prontas.');
     } catch (err) {
       console.error(err);
-      alert('Erro ao atualizar status.');
+      toast.error('Erro ao atualizar status.');
     }
   };
 
@@ -158,15 +192,39 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     if (!lossReasonProposalId) return;
     const p = proposals.find(p => p.id === lossReasonProposalId);
     if (p) {
-      const updates = { 
-        status: ProposalStatus.LOST, 
-        lossReason: lossReason 
+      const updates = {
+        status: ProposalStatus.LOST,
+        lossReason: lossReason
       };
       await proposalService.updateProposal(lossReasonProposalId, updates);
+      // Sincroniza a Obra vinculada → perdida
+      if (p.obraId) {
+        await obraService.update(p.obraId, { status: 'perdida' });
+      }
       setProposals(proposals.map(item => item.id === lossReasonProposalId ? { ...item, ...updates } : item));
     }
     setLossReason('');
     setLossReasonProposalId(null);
+  };
+
+  const openReschedule = (p: Proposal) => {
+    setFollowUpValue(p.followUpDate ? p.followUpDate.slice(0, 10) : '');
+    setFollowUpId(p.id);
+  };
+
+  const dateInDays = (days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+  };
+
+  const handleSaveFollowUp = async () => {
+    if (!followUpId) return;
+    const value = followUpValue || undefined;
+    await proposalService.updateProposal(followUpId, { followUpDate: value });
+    setProposals(proposals.map(item => item.id === followUpId ? { ...item, followUpDate: value } : item));
+    toast.success(value ? 'Follow-up reagendado' : 'Follow-up removido');
+    setFollowUpId(null);
   };
 
   return (
@@ -265,13 +323,16 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                     </select>
                   </td>
                   <td className="px-8 py-5">
-                     <div className={cn(
-                       "flex items-center gap-2 text-xs font-medium",
-                       isOverdue(p.followUpDate) ? "text-red-500" : "opacity-60"
+                     <button
+                       onClick={(e) => { e.stopPropagation(); openReschedule(p); }}
+                       title="Reagendar follow-up"
+                       className={cn(
+                       "flex items-center gap-2 text-xs font-medium rounded-lg px-2 py-1 -mx-2 transition-colors hover:bg-black/5",
+                       isOverdue(p.followUpDate) ? "text-red-500" : "opacity-60 hover:opacity-100"
                      )}>
                        <Bell size={14} className={isOverdue(p.followUpDate) ? "animate-bounce" : ""} />
-                       {p.followUpDate ? formatDate(p.followUpDate) : 'Não agendado'}
-                     </div>
+                       {p.followUpDate ? formatDate(p.followUpDate) : 'Agendar'}
+                     </button>
                   </td>
                   <td className="px-8 py-5 text-right relative">
                     <div className="flex items-center justify-end gap-2">
@@ -312,8 +373,11 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             <button onClick={() => window.open(`/proposal/${p.id}`, '_blank')} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <ExternalLink size={14} className="opacity-40" /> Copiar Link Público
                             </button>
-                            <button className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                            <button onClick={() => { setPdfProposal(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Download size={14} className="opacity-40" /> Baixar PDF
+                            </button>
+                            <button onClick={() => { openReschedule(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                              <Calendar size={14} className="opacity-40" /> Reagendar Follow-up
                             </button>
                             <button onClick={() => { setInteractionId(p.id); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-[var(--color-brand-primary)]/10 text-[var(--color-brand-primary)] font-bold transition-colors">
                               <MessageSquare size={14} className="opacity-40" /> Registrar Interação
@@ -701,13 +765,120 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                >
                  Cancelar
                </button>
-               <button 
+               <button
                 onClick={handleSaveLossReason}
                 disabled={!lossReason}
                 className="flex-[2] py-3 bg-red-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-200 hover:bg-red-700 transition-all disabled:opacity-50"
                >
                  Confirmar Perda <AlertCircle size={16} />
                </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* PDF Preview Modal */}
+      {pdfProposal && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+          onClick={() => setPdfProposal(null)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={e => e.stopPropagation()}
+            className="bg-white rounded-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col shadow-2xl"
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-black/5 shrink-0">
+              <div>
+                <h3 className="text-sm font-black tracking-tight">Pré-visualização do PDF</h3>
+                <p className="text-[10px] opacity-40 font-bold uppercase tracking-widest">
+                  {pdfProposal.proposalNumber} · {pdfProposal.clientName}
+                </p>
+              </div>
+              <button
+                onClick={() => setPdfProposal(null)}
+                className="p-2 hover:bg-black/5 rounded-full transition-colors"
+                title="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 bg-neutral-100">
+              <div className="bg-white mx-auto shadow-sm" style={{ maxWidth: '21cm', padding: '2cm' }}>
+                <ProposalPrintView proposal={pdfProposal} />
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Reschedule Follow-up Modal */}
+      {followUpId && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          onClick={() => setFollowUpId(null)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={e => e.stopPropagation()}
+            className="bg-white rounded-2xl w-full max-w-md p-8 shadow-2xl space-y-6"
+          >
+            <div className="space-y-1">
+              <h3 className="text-xl font-bold tracking-tight">Reagendar Follow-up</h3>
+              <p className="text-xs opacity-40 font-bold uppercase tracking-widest leading-none">
+                Proposta #{proposals.find(p => p.id === followUpId)?.proposalNumber}
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Data do próximo contato</label>
+              <input
+                type="date"
+                value={followUpValue}
+                onChange={e => setFollowUpValue(e.target.value)}
+                className="w-full p-4 bg-black/5 rounded-xl border-transparent focus:ring-2 focus:ring-[var(--color-brand-primary)] text-sm font-medium"
+              />
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: 'Hoje', days: 0 },
+                  { label: '+3 dias', days: 3 },
+                  { label: '+7 dias', days: 7 },
+                  { label: '+15 dias', days: 15 },
+                ].map(preset => (
+                  <button
+                    key={preset.label}
+                    onClick={() => setFollowUpValue(dateInDays(preset.days))}
+                    className="px-3 py-1.5 bg-black/5 hover:bg-black/10 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setFollowUpValue('')}
+                className="py-3 px-4 text-xs font-bold text-red-500 hover:bg-red-50 rounded-xl transition-colors uppercase tracking-widest"
+                title="Limpar data"
+              >
+                Limpar
+              </button>
+              <div className="flex-1" />
+              <button
+                onClick={() => setFollowUpId(null)}
+                className="py-3 px-4 text-sm font-bold opacity-40 hover:opacity-100 transition-opacity"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveFollowUp}
+                className="py-3 px-6 bg-[var(--color-brand-primary)] text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-[var(--color-brand-primary)]/20 hover:opacity-90 transition-all"
+              >
+                Salvar <Calendar size={16} />
+              </button>
             </div>
           </motion.div>
         </div>

@@ -118,6 +118,114 @@ export function maskPhone(phone: string | undefined | null): string {
   return `(${ddd}) *****-${last4}`;
 }
 
+// ─── Máscaras de input (formatam progressivamente enquanto o usuário digita) ──
+
+/** Aplica máscara de CNPJ: 00.000.000/0000-00 */
+export function maskCNPJInput(value: string): string {
+  const d = value.replace(/\D/g, '').slice(0, 14);
+  if (d.length > 12) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+  if (d.length > 8) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8)}`;
+  if (d.length > 5) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5)}`;
+  if (d.length > 2) return `${d.slice(0, 2)}.${d.slice(2)}`;
+  return d;
+}
+
+/** Aplica máscara de CPF: 000.000.000-00 */
+export function maskCPFInput(value: string): string {
+  const d = value.replace(/\D/g, '').slice(0, 11);
+  if (d.length > 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  if (d.length > 6) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+  if (d.length > 3) return `${d.slice(0, 3)}.${d.slice(3)}`;
+  return d;
+}
+
+/** Aplica máscara de CEP: 00000-000 */
+export function maskCEPInput(value: string): string {
+  const d = value.replace(/\D/g, '').slice(0, 8);
+  return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
+}
+
+/** Aplica máscara de telefone: (00) 0000-0000 ou (00) 00000-0000 */
+export function maskPhoneInput(value: string): string {
+  const d = value.replace(/\D/g, '').slice(0, 11);
+  if (d.length === 0) return '';
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+// ─── Validadores (dígito verificador) ────────────────────────────────────────
+
+/** Valida CPF pelos dígitos verificadores. */
+export function isValidCPF(cpf: string): boolean {
+  const d = cpf.replace(/\D/g, '');
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += parseInt(d[i], 10) * (10 - i);
+  let check = 11 - (sum % 11);
+  if (check >= 10) check = 0;
+  if (check !== parseInt(d[9], 10)) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += parseInt(d[i], 10) * (11 - i);
+  check = 11 - (sum % 11);
+  if (check >= 10) check = 0;
+  return check === parseInt(d[10], 10);
+}
+
+/** Valida CNPJ pelos dígitos verificadores. */
+export function isValidCNPJ(cnpj: string): boolean {
+  const d = cnpj.replace(/\D/g, '');
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+  const digit = (len: number): number => {
+    const weights = len === 12
+      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    let sum = 0;
+    for (let i = 0; i < len; i++) sum += parseInt(d[i], 10) * weights[i];
+    const r = sum % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return digit(12) === parseInt(d[12], 10) && digit(13) === parseInt(d[13], 10);
+}
+
+/** Validação simples de e-mail. */
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// ─── Busca de endereço por CEP (ViaCEP) ──────────────────────────────────────
+
+export interface CepAddress {
+  street?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+}
+
+/**
+ * Consulta o ViaCEP e retorna o endereço, ou null se o CEP for inválido,
+ * não encontrado, ou em caso de falha de rede.
+ */
+export async function fetchAddressByCEP(cep: string): Promise<CepAddress | null> {
+  const d = cep.replace(/\D/g, '');
+  if (d.length !== 8) return null;
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${d}/json/`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.erro) return null;
+    return {
+      street: data.logradouro || undefined,
+      neighborhood: data.bairro || undefined,
+      city: data.localidade || undefined,
+      state: data.uf || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function safeParseJSON<T>(text: string, defaultValue: T): T {
   try {
     // Try clean parse first

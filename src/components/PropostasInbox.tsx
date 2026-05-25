@@ -10,6 +10,7 @@ import { obraService } from '../services/obraService';
 import { clientService } from '../services/clientService';
 import { budgetProjectService } from '../services/budgetProjectService';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { useConfirm } from './ConfirmDialog';
 
 interface Props {
   /** Called after "Assumir" — caller opens ProposalWizard with this obraId */
@@ -24,6 +25,7 @@ interface InboxItem {
 }
 
 export function PropostasInbox({ onAssume, refreshSignal }: Props) {
+  const confirm = useConfirm();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [assuming, setAssuming] = useState<string | null>(null);
@@ -67,12 +69,12 @@ export function PropostasInbox({ onAssume, refreshSignal }: Props) {
   useEffect(() => { load(); }, [load, refreshSignal]);
 
   const handleAssume = async (item: InboxItem) => {
-    if (
-      !confirm(
-        `Assumir elaboração da proposta para "${item.obra.name}" (${item.client.companyName})?`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: 'Assumir proposta',
+      message: <>Assumir a elaboração da proposta para <b>{item.obra.name}</b> ({item.client.companyName})?</>,
+      confirmLabel: 'Assumir',
+    });
+    if (!ok) return;
 
     setAssuming(item.obra.id);
     try {

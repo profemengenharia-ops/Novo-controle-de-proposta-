@@ -74,8 +74,10 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
     );
   }
 
-  const isCalculated = proposal.status === 'calculado';
-  const isPending = proposal.status === 'calculando' || proposal.status === 'pendente';
+  // Estes status pertencem ao fluxo de cálculo de preço (não ao enum ProposalStatus).
+  const status = proposal.status as string;
+  const isCalculated = status === 'calculado';
+  const isPending = status === 'calculando' || status === 'pendente';
 
   return (
     <motion.div 

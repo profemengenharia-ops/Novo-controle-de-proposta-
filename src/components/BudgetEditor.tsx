@@ -3,7 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, Save, Check,
   Package, HardHat, Wrench, Truck, Edit2, GripVertical,
-  AlertCircle, TrendingUp, Settings2, ChevronUp, Send,
+  AlertCircle, TrendingUp, Settings2, ChevronUp, Send, Copy,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
@@ -18,6 +18,7 @@ import { obraService } from '../services/obraService';
 import { formatCurrency, cn, calculateBDI } from '../lib/utils';
 import { AddBudgetItemModal } from './AddBudgetItemModal';
 import { BudgetPrintView } from './BudgetPrintView';
+import { useConfirm } from './ConfirmDialog';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ interface Props {
 
 export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Props) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [project, setProject] = useState<BudgetProject>(initial);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -161,8 +163,14 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
     setEditingStageId(null);
   };
 
-  const deleteStage = (id: string) => {
-    if (!confirm('Excluir esta etapa e todos os seus itens?')) return;
+  const deleteStage = async (id: string) => {
+    const ok = await confirm({
+      title: 'Excluir etapa',
+      message: 'Excluir esta etapa e todos os seus itens?',
+      confirmLabel: 'Excluir',
+      tone: 'danger',
+    });
+    if (!ok) return;
     update({ stages: project.stages.filter(s => s.id !== id) });
   };
 
@@ -199,6 +207,45 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
         s.id === stageId ? { ...s, items: s.items.filter(i => i.id !== itemId) } : s
       ),
     });
+  };
+
+  const duplicateStage = (id: string) => {
+    const stage = project.stages.find(s => s.id === id);
+    if (!stage) return;
+    const clone: BudgetStage = {
+      id: newId(),
+      name: `${stage.name} (cópia)`,
+      order: project.stages.length + 1,
+      items: stage.items.map(i => ({ ...i, id: newId() })),
+    };
+    setExpandedStages(prev => new Set([...prev, clone.id]));
+    update({ stages: [...project.stages, clone] });
+  };
+
+  const duplicateItem = (stageId: string, itemId: string) => {
+    update({
+      stages: project.stages.map(s => {
+        if (s.id !== stageId) return s;
+        const idx = s.items.findIndex(i => i.id === itemId);
+        if (idx === -1) return s;
+        const clone: BudgetLineItem = { ...s.items[idx], id: newId() };
+        return { ...s, items: [...s.items.slice(0, idx + 1), clone, ...s.items.slice(idx + 1)] };
+      }),
+    });
+  };
+
+  // Guarda contra perda de alterações não salvas ao voltar.
+  const handleBack = async () => {
+    if (dirty) {
+      const ok = await confirm({
+        title: 'Alterações não salvas',
+        message: 'Há alterações não salvas neste orçamento. Deseja sair mesmo assim?',
+        confirmLabel: 'Sair sem salvar',
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
+    onBack();
   };
 
   const updateBDIField = (key: keyof BudgetBDI, value: number) => {
@@ -240,11 +287,20 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
       return;
     }
     if (project.linkedProposalId) {
-      const go = confirm('Este orçamento já tem uma proposta vinculada. Deseja abri-la?');
+      const go = await confirm({
+        title: 'Proposta vinculada',
+        message: 'Este orçamento já tem uma proposta vinculada. Deseja abri-la?',
+        confirmLabel: 'Abrir proposta',
+      });
       if (go && onSendToProposal) onSendToProposal(project.linkedProposalId);
       return;
     }
-    if (!confirm(`Enviar orçamento "${project.title}" para o setor de Propostas?`)) return;
+    const okSend = await confirm({
+      title: 'Enviar para Proposta',
+      message: <>Enviar o orçamento <b>{project.title}</b> para o setor de Propostas?</>,
+      confirmLabel: 'Enviar',
+    });
+    if (!okSend) return;
 
     setSendingToProposal(true);
     try {
@@ -339,7 +395,7 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
       {/* Breadcrumb + header */}
       <div className="flex flex-col gap-3">
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest opacity-40 hover:opacity-100 transition-opacity w-fit"
         >
           ← Voltar aos Orçamentos
@@ -467,6 +523,13 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
                     <Plus size={13} />
                   </button>
                   <button
+                    onClick={() => duplicateStage(stage.id)}
+                    className="p-1.5 hover:bg-black/5 rounded-lg text-black/40 hover:text-black transition-colors"
+                    title="Duplicar etapa"
+                  >
+                    <Copy size={13} />
+                  </button>
+                  <button
                     onClick={() => deleteStage(stage.id)}
                     className="p-1.5 hover:bg-red-50 rounded-lg text-red-400 hover:text-red-600 transition-colors"
                     title="Excluir etapa"
@@ -510,6 +573,7 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
                                 item={item}
                                 onUpdate={patch => updateItem(stage.id, item.id, patch)}
                                 onDelete={() => deleteItem(stage.id, item.id)}
+                                onDuplicate={() => duplicateItem(stage.id, item.id)}
                                 onEdit={() => setAddItemModal({ stageId: stage.id, item })}
                               />
                             ))}
@@ -584,6 +648,28 @@ export function BudgetEditor({ project: initial, onBack, onSendToProposal }: Pro
                 <p className="text-xs opacity-30 text-center py-2">Adicione itens para ver o resumo.</p>
               )}
             </div>
+
+            {/* Peso por etapa */}
+            {totalDirectCost > 0 && project.stages.length > 0 && (
+              <div className="border-t border-black/5 pt-3 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">Peso por etapa</p>
+                {project.stages.map(st => {
+                  const stageTotal = calcStageTotal(st);
+                  const pct = totalDirectCost > 0 ? (stageTotal / totalDirectCost) * 100 : 0;
+                  return (
+                    <div key={st.id} className="space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold opacity-60 truncate">{st.name}</span>
+                        <span className="text-[10px] font-mono font-bold opacity-50 shrink-0">{pct.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-black/5 overflow-hidden">
+                        <div className="h-full bg-orange-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="border-t border-black/5 pt-3 space-y-2">
               <div className="flex justify-between items-center">
@@ -732,10 +818,11 @@ interface ItemRowProps {
   item: BudgetLineItem;
   onUpdate: (patch: Partial<BudgetLineItem>) => void;
   onDelete: () => void;
+  onDuplicate: () => void;
   onEdit: () => void;
 }
 
-function ItemRow({ item, onUpdate, onDelete, onEdit }: ItemRowProps) {
+function ItemRow({ item, onUpdate, onDelete, onDuplicate, onEdit }: ItemRowProps) {
   const [editQty, setEditQty] = useState(false);
   const [editCost, setEditCost] = useState(false);
 
@@ -798,8 +885,9 @@ function ItemRow({ item, onUpdate, onDelete, onEdit }: ItemRowProps) {
 
       <td className="px-3 py-3">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={onEdit} className="p-1 hover:bg-black/5 rounded text-black/30 hover:text-black transition-colors"><Edit2 size={11} /></button>
-          <button onClick={onDelete} className="p-1 hover:bg-red-50 rounded text-red-300 hover:text-red-600 transition-colors"><Trash2 size={11} /></button>
+          <button onClick={onEdit} className="p-1 hover:bg-black/5 rounded text-black/30 hover:text-black transition-colors" title="Editar"><Edit2 size={11} /></button>
+          <button onClick={onDuplicate} className="p-1 hover:bg-black/5 rounded text-black/30 hover:text-black transition-colors" title="Duplicar"><Copy size={11} /></button>
+          <button onClick={onDelete} className="p-1 hover:bg-red-50 rounded text-red-300 hover:text-red-600 transition-colors" title="Excluir"><Trash2 size={11} /></button>
         </div>
       </td>
     </tr>

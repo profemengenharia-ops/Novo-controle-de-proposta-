@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { LaborRate } from '../types';
 import { laborRateService } from '../services/laborRateService';
 import { formatCurrency, cn } from '../lib/utils';
+import { useConfirm } from './ConfirmDialog';
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
@@ -168,6 +169,7 @@ function LaborRateModal({ editing, onClose, onSave }: ModalProps) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function LaborRateManager() {
+  const confirm = useConfirm();
   const [rates, setRates] = useState<LaborRate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -183,7 +185,13 @@ export function LaborRateManager() {
   useEffect(() => { load(); }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Excluir esta taxa de mão de obra?')) return;
+    const ok = await confirm({
+      title: 'Excluir taxa',
+      message: 'Excluir esta taxa de mão de obra?',
+      confirmLabel: 'Excluir',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await laborRateService.delete(id);
     toast.success('Taxa removida.');
     load();

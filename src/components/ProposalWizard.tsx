@@ -38,6 +38,7 @@ import { PricingFormulation } from './PricingFormulation';
 import { CommercialItem, PriceFormation, GlobalPriceFormation } from '../types';
 
 import { ProposalPrintView } from './ProposalPrintView';
+import { usePrompt } from './ConfirmDialog';
 import { BudgetSelector } from './BudgetSelector';
 import { budgetProjectService } from '../services/budgetProjectService';
 import { BudgetProject } from '../types';
@@ -51,6 +52,7 @@ interface WizardProps {
 
 export function ProposalWizard({ proposalId, initialObraId, onComplete }: WizardProps) {
   const { user } = useAuth();
+  const prompt = usePrompt();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -214,11 +216,11 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
 
   const handleSave = async () => {
     if (!proposal.clientName?.trim()) {
-      alert('Por favor, informe o nome do cliente.');
+      toast.error('Por favor, informe o nome do cliente.');
       return;
     }
     if (!proposal.scopeTitle?.trim()) {
-      alert('Por favor, informe o título do escopo.');
+      toast.error('Por favor, informe o título do escopo.');
       return;
     }
 
@@ -824,8 +826,8 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
                          <div className="flex items-center justify-between">
                             <label className="text-xs font-bold uppercase tracking-widest opacity-40">Referências de Projeto</label>
                             <button 
-                              onClick={() => {
-                                const name = prompt('Nome da referência:');
+                              onClick={async () => {
+                                const name = await prompt({ title: 'Adicionar referência', label: 'Nome da referência', placeholder: 'Ex.: Projeto executivo, memorial…' });
                                 if (name) updateTechnical('references', [...(proposal.technicalScope?.references || []), name]);
                               }}
                               className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center"
@@ -861,8 +863,8 @@ export function ProposalWizard({ proposalId, initialObraId, onComplete }: Wizard
                         <div className="flex items-center justify-between">
                           <label className="text-xs font-bold uppercase tracking-widest opacity-40">Normas Técnicas Aplicáveis</label>
                           <button 
-                            onClick={() => {
-                              const name = prompt('Nome da norma técnica:');
+                            onClick={async () => {
+                              const name = await prompt({ title: 'Adicionar norma técnica', label: 'Nome da norma', placeholder: 'Ex.: NBR 13714' });
                               if (name) updateTechnical('norms', [...(proposal.technicalScope?.norms || []), name]);
                             }}
                             className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center"

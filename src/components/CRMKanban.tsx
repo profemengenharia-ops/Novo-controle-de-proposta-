@@ -537,6 +537,8 @@ export function CRMKanban() {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverColId, setDragOverColId] = useState<ColumnId | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [lossModal, setLossModal] = useState<{ obraId: string; prevStatus: ObraStatus } | null>(null);
+  const [lossReason, setLossReason] = useState('');
 
   const loadData = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
@@ -593,6 +595,52 @@ export function CRMKanban() {
     setDragOverColId(colId);
   };
   const handleDragLeave = () => {};
+
+  /** Mapeia o status da Obra para o status equivalente da Proposta vinculada. */
+  const proposalStatusForObra = (s: ObraStatus): ProposalStatus | null => {
+    switch (s) {
+      case 'em_proposta':      return ProposalStatus.DRAFT;
+      case 'proposta_enviada': return ProposalStatus.SENT;
+      case 'ganha':            return ProposalStatus.WON;
+      case 'perdida':          return ProposalStatus.LOST;
+      default:                 return null;
+    }
+  };
+
+  /** Aplica a mudança de status na Obra e sincroniza a Proposta vinculada. */
+  const applyStatusChange = async (
+    obraId: string,
+    newStatus: ObraStatus,
+    prevStatus: ObraStatus,
+    opts?: { lossReason?: string; label?: string },
+  ) => {
+    const obra = obras.find(o => o.id === obraId);
+    setObras(prev => prev.map(o => o.id === obraId ? { ...o, status: newStatus } : o));
+    setUpdatingId(obraId);
+    try {
+      await obraService.update(obraId, { status: newStatus });
+
+      // Sincroniza o status da Proposta vinculada (se houver)
+      const proposalId = obra?.proposalId;
+      const mappedStatus = proposalStatusForObra(newStatus);
+      if (proposalId && mappedStatus) {
+        const updates: Partial<Proposal> = { status: mappedStatus };
+        if (opts?.lossReason) updates.lossReason = opts.lossReason;
+        await proposalService.updateProposal(proposalId, updates);
+        setProposalMap(prev =>
+          prev[proposalId] ? { ...prev, [proposalId]: { ...prev[proposalId], ...updates } } : prev,
+        );
+      }
+
+      toast.success(`Movido para ${opts?.label ?? newStatus}`, { description: obra?.name });
+    } catch {
+      toast.error('Erro ao mover obra');
+      setObras(prev => prev.map(o => o.id === obraId ? { ...o, status: prevStatus } : o));
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent, col: KanbanColumn) => {
     e.preventDefault();
     setDragOverColId(null);
@@ -600,20 +648,17 @@ export function CRMKanban() {
     if (!droppedId) return;
     const obra = obras.find(o => o.id === droppedId);
     if (!obra || col.statuses.includes(obra.status)) { setDraggedId(null); return; }
-    const newStatus = col.targetStatus;
     const prevStatus = obra.status;
     setDraggedId(null);
-    setObras(prev => prev.map(o => o.id === droppedId ? { ...o, status: newStatus } : o));
-    setUpdatingId(droppedId);
-    try {
-      await obraService.update(droppedId, { status: newStatus });
-      toast.success(`Movido para ${col.label}`, { description: obra.name });
-    } catch {
-      toast.error('Erro ao mover obra');
-      setObras(prev => prev.map(o => o.id === droppedId ? { ...o, status: prevStatus } : o));
-    } finally {
-      setUpdatingId(null);
+
+    // Coluna "Perdido": captura o motivo antes de aplicar
+    if (col.id === 'perdido') {
+      setLossReason('');
+      setLossModal({ obraId: droppedId, prevStatus });
+      return;
     }
+
+    await applyStatusChange(droppedId, col.targetStatus, prevStatus, { label: col.label });
   };
   const handleDragEnd = () => { setDraggedId(null); setDragOverColId(null); };
 
@@ -637,6 +682,15 @@ export function CRMKanban() {
     } finally {
       setUpdatingId(null);
     }
+  };
+
+  /** Confirma a perda capturada no modal e sincroniza a proposta. */
+  const confirmLoss = async () => {
+    if (!lossModal) return;
+    const { obraId, prevStatus } = lossModal;
+    const reason = lossReason;
+    setLossModal(null);
+    await applyStatusChange(obraId, 'perdida', prevStatus, { lossReason: reason, label: 'Perdido' });
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -733,6 +787,57 @@ export function CRMKanban() {
           })}
         </div>
       </div>
+
+      {/* Modal de motivo da perda (ao arrastar para "Perdido") */}
+      {lossModal && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+          onClick={() => setLossModal(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="bg-white rounded-2xl w-full max-w-md p-8 shadow-2xl space-y-6"
+          >
+            <div className="space-y-1">
+              <h3 className="text-xl font-bold tracking-tight text-rose-600">Por que perdemos esta oportunidade?</h3>
+              <p className="text-xs opacity-40 font-bold uppercase tracking-widest leading-none">O motivo é salvo na proposta vinculada</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Motivo da Perda</label>
+              <select
+                value={lossReason}
+                onChange={e => setLossReason(e.target.value)}
+                className="w-full p-4 bg-black/5 rounded-xl border-transparent focus:ring-2 focus:ring-rose-400 text-sm font-medium"
+              >
+                <option value="">Selecione um motivo...</option>
+                <option value="Preço alto">Preço alto / Concorrência</option>
+                <option value="Prazo de entrega">Prazo de entrega não atendido</option>
+                <option value="Escopo técnico">Falta de conformidade técnica</option>
+                <option value="Relacionamento">Perda por relacionamento / Indicação</option>
+                <option value="Cancelado">Projeto cancelado pelo cliente</option>
+                <option value="Outros">Outros</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setLossModal(null)}
+                className="flex-1 py-3 text-sm font-bold opacity-40 hover:opacity-100 transition-opacity"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmLoss}
+                disabled={!lossReason}
+                className="flex-[2] py-3 bg-rose-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-rose-200 hover:bg-rose-700 transition-all disabled:opacity-50"
+              >
+                Confirmar Perda <AlertTriangle size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

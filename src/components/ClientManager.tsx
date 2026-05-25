@@ -8,7 +8,11 @@ import { toast } from 'sonner';
 import { Client, ClientContact } from '../types';
 import { clientService } from '../services/clientService';
 import { useAuth } from '../hooks/useAuth';
-import { cn } from '../lib/utils';
+import {
+  cn, maskCNPJInput, maskCPFInput, maskCEPInput, maskPhoneInput,
+  isValidCNPJ, isValidCPF, isValidEmail, fetchAddressByCEP,
+} from '../lib/utils';
+import { useConfirm } from './ConfirmDialog';
 
 interface Props {
   selectedClientId?: string | null;
@@ -42,6 +46,7 @@ const emptyClient = (): Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'created
 
 export function ClientManager({ selectedClientId, onSelectClient, onClientsChanged }: Props) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -79,7 +84,13 @@ export function ClientManager({ selectedClientId, onSelectClient, onClientsChang
   };
 
   const handleDelete = async (c: Client) => {
-    if (!confirm(`Excluir cliente "${c.companyName}"? Esta ação não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: 'Excluir cliente',
+      message: <>Excluir o cliente <b>{c.companyName}</b>? Esta ação não pode ser desfeita.</>,
+      confirmLabel: 'Excluir',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await clientService.delete(c.id);
       toast.success('Cliente excluído');
@@ -233,6 +244,7 @@ export function ClientManager({ selectedClientId, onSelectClient, onClientsChang
         {showModal && editing && (
           <ClientFormModal
             initial={editing}
+            existingClients={clients}
             onClose={() => { setShowModal(false); setEditing(null); }}
             onSaved={async () => {
               await load();
@@ -250,17 +262,45 @@ export function ClientManager({ selectedClientId, onSelectClient, onClientsChang
 
 interface ModalProps {
   initial: Client;
+  existingClients: Client[];
   onClose: () => void;
   onSaved: () => void;
   userId: string;
 }
 
-function ClientFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
+function ClientFormModal({ initial, existingClients, onClose, onSaved, userId }: ModalProps) {
+  const confirm = useConfirm();
   const isNew = !initial.id;
   const [form, setForm] = useState<Client>(initial);
   const [saving, setSaving] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
 
   const set = <K extends keyof Client>(k: K, v: Client[K]) => setForm(f => ({ ...f, [k]: v }));
+
+  // Busca endereço pelo CEP (ViaCEP) e preenche cidade/UF/endereço.
+  const handleCepLookup = async () => {
+    const digits = (form.cep ?? '').replace(/\D/g, '');
+    if (digits.length !== 8) return;
+    setCepLoading(true);
+    try {
+      const addr = await fetchAddressByCEP(digits);
+      if (!addr) {
+        toast.error('CEP não encontrado.');
+        return;
+      }
+      setForm(f => ({
+        ...f,
+        city: addr.city ?? f.city,
+        state: addr.state ?? f.state,
+        billingAddress: f.billingAddress?.trim()
+          ? f.billingAddress
+          : [addr.street, addr.neighborhood].filter(Boolean).join(' - '),
+      }));
+      toast.success('Endereço preenchido pelo CEP.');
+    } finally {
+      setCepLoading(false);
+    }
+  };
 
   const addContact = () => setForm(f => ({
     ...f,
@@ -286,6 +326,35 @@ function ClientFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
     if (!form.companyName.trim()) {
       toast.error('Informe a razão social.');
       return;
+    }
+    // Validação de documentos (apenas se preenchidos)
+    if (form.cnpj?.trim() && !isValidCNPJ(form.cnpj)) {
+      toast.error('CNPJ inválido. Verifique os dígitos.');
+      return;
+    }
+    if (form.cpf?.trim() && !isValidCPF(form.cpf)) {
+      toast.error('CPF inválido. Verifique os dígitos.');
+      return;
+    }
+    const invalidContact = form.contacts.find(c => c.email?.trim() && !isValidEmail(c.email));
+    if (invalidContact) {
+      toast.error(`E-mail inválido no contato "${invalidContact.name || 'sem nome'}".`);
+      return;
+    }
+    // Detecção de CNPJ duplicado (apenas em novo cadastro)
+    const cnpjDigits = (form.cnpj ?? '').replace(/\D/g, '');
+    if (cnpjDigits) {
+      const dup = existingClients.find(
+        c => c.id !== form.id && (c.cnpj ?? '').replace(/\D/g, '') === cnpjDigits,
+      );
+      if (dup) {
+        const proceed = await confirm({
+          title: 'CNPJ já cadastrado',
+          message: <>Já existe um cliente com este CNPJ: <b>{dup.companyName}</b>. Deseja cadastrar mesmo assim?</>,
+          confirmLabel: 'Cadastrar assim mesmo',
+        });
+        if (!proceed) return;
+      }
     }
     setSaving(true);
     try {
@@ -379,7 +448,8 @@ function ClientFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
               <Field label="CNPJ">
                 <input
                   value={form.cnpj ?? ''}
-                  onChange={e => set('cnpj', e.target.value)}
+                  onChange={e => set('cnpj', maskCNPJInput(e.target.value))}
+                  inputMode="numeric"
                   placeholder="00.000.000/0000-00"
                   className={inputCls}
                 />
@@ -387,7 +457,8 @@ function ClientFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
               <Field label="CPF (se PF)">
                 <input
                   value={form.cpf ?? ''}
-                  onChange={e => set('cpf', e.target.value)}
+                  onChange={e => set('cpf', maskCPFInput(e.target.value))}
+                  inputMode="numeric"
                   placeholder="000.000.000-00"
                   className={inputCls}
                 />
@@ -418,12 +489,19 @@ function ClientFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
                 />
               </Field>
               <Field label="CEP" col={2}>
-                <input
-                  value={form.cep ?? ''}
-                  onChange={e => set('cep', e.target.value)}
-                  placeholder="00000-000"
-                  className={inputCls}
-                />
+                <div className="relative">
+                  <input
+                    value={form.cep ?? ''}
+                    onChange={e => set('cep', maskCEPInput(e.target.value))}
+                    onBlur={handleCepLookup}
+                    inputMode="numeric"
+                    placeholder="00000-000"
+                    className={inputCls}
+                  />
+                  {cepLoading && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-orange-500" />
+                  )}
+                </div>
               </Field>
               <Field label="Cidade" col={4}>
                 <input
@@ -491,7 +569,8 @@ function ClientFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
                     />
                     <input
                       value={ct.phone ?? ''}
-                      onChange={e => updateContact(ct.id, { phone: e.target.value })}
+                      onChange={e => updateContact(ct.id, { phone: maskPhoneInput(e.target.value) })}
+                      inputMode="numeric"
                       placeholder="(00) 00000-0000"
                       className="col-span-2 px-2.5 py-1.5 text-xs bg-white border border-black/10 rounded-lg focus:outline-none focus:border-black/30"
                     />

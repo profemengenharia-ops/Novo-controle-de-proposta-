@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Package,
   Search,
@@ -16,6 +16,7 @@ import {
   HardHat,
   Inbox,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Product, BudgetProject } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { usePricingEngine, PricingSettings, PricingItem } from '../hooks/usePricingEngine';
@@ -27,6 +28,7 @@ import { BudgetProjectList } from './BudgetProjectList';
 import { BudgetEditor } from './BudgetEditor';
 import { LaborRateManager } from './LaborRateManager';
 import { OrcamentosInbox } from './OrcamentosInbox';
+import { useConfirm } from './ConfirmDialog';
 
 type Tab = 'inbox' | 'orcamentos' | 'catalogo' | 'mao_de_obra';
 
@@ -136,6 +138,8 @@ function CatalogoInsumos() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const confirm = useConfirm();
 
   const pricingSettings: PricingSettings = {
     taxRate: 0.15,
@@ -166,21 +170,23 @@ function CatalogoInsumos() {
   useEffect(() => { loadProducts(); }, []);
 
   const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este insumo/serviço do catálogo?')) {
-      await inventoryService.deleteProduct(id);
-      loadProducts();
-    }
+    const ok = await confirm({
+      title: 'Excluir do catálogo',
+      message: 'Tem certeza que deseja excluir este insumo/serviço do catálogo?',
+      confirmLabel: 'Excluir',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    await inventoryService.deleteProduct(id);
+    await loadProducts();
+    toast.success('Item removido do catálogo');
   };
 
-  const handleSyncWithSupplier = async () => {
-    const baseUrl = prompt('Digite a URL base da API do fornecedor:', 'https://api.supplier.com/v1');
-    const apiKey = prompt('Digite a chave da API:');
-    if (!baseUrl || !apiKey) { alert('Configuração de fornecedor incompleta.'); return; }
+  const runSupplierSync = async (baseUrl: string, apiKey: string) => {
     setIsSyncing(true);
     try {
       const supplierData = await supplierService.fetchSupplierStock({ baseUrl, apiKey, supplierName: 'Fornecedor Integrado' });
-      alert(`${supplierData.length} insumos encontrados. Sincronizando...`);
-      const updatesList: {id: string, updates: Partial<Product>}[] = [];
+      const updatesList: { id: string, updates: Partial<Product> }[] = [];
       for (const item of supplierData) {
         const local = products.find(p => p.name.toLowerCase() === item.name?.toLowerCase());
         if (local) {
@@ -198,10 +204,10 @@ function CatalogoInsumos() {
         await inventoryService.updateProductsBatch(updatesList);
       }
       await loadProducts();
-      alert('Sincronização concluída!');
+      toast.success(`Sincronização concluída — ${updatesList.length} de ${supplierData.length} insumos atualizados.`);
     } catch (error) {
       console.error(error);
-      alert('Erro ao sincronizar com fornecedor.');
+      toast.error('Erro ao sincronizar com fornecedor.');
     } finally {
       setIsSyncing(false);
     }
@@ -235,7 +241,7 @@ function CatalogoInsumos() {
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
           <button
-            onClick={handleSyncWithSupplier}
+            onClick={() => setShowSyncModal(true)}
             disabled={isSyncing}
             className="flex-1 md:flex-none px-4 py-3 bg-black/5 hover:bg-black/10 rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all disabled:opacity-50"
           >
@@ -373,6 +379,95 @@ function CatalogoInsumos() {
           onComplete={() => { loadProducts(); setIsModalOpen(false); }}
         />
       )}
+
+      <AnimatePresence>
+        {showSyncModal && (
+          <SupplierSyncModal
+            syncing={isSyncing}
+            onClose={() => setShowSyncModal(false)}
+            onSync={(baseUrl, apiKey) => { setShowSyncModal(false); runSupplierSync(baseUrl, apiKey); }}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Modal de sincronização com fornecedor ───────────────────────────────────
+
+function SupplierSyncModal({ onClose, onSync, syncing }: {
+  onClose: () => void;
+  onSync: (baseUrl: string, apiKey: string) => void;
+  syncing: boolean;
+}) {
+  const [baseUrl, setBaseUrl] = useState('https://api.supplier.com/v1');
+  const [apiKey, setApiKey] = useState('');
+
+  const submit = () => {
+    if (!baseUrl.trim() || !apiKey.trim()) {
+      toast.error('Informe a URL base e a chave da API.');
+      return;
+    }
+    onSync(baseUrl.trim(), apiKey.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.97, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 16 }}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+      >
+        <div className="p-6 bg-black text-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/10 p-2.5 rounded-xl"><RefreshCcw size={18} /></div>
+            <div>
+              <h3 className="text-base font-black">Sincronizar com Fornecedor</h3>
+              <p className="text-[10px] opacity-40 font-bold uppercase tracking-widest">Atualiza preços do catálogo</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={18} /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-black uppercase tracking-widest opacity-50">URL base da API</label>
+            <input
+              value={baseUrl}
+              onChange={e => setBaseUrl(e.target.value)}
+              placeholder="https://api.fornecedor.com/v1"
+              className="w-full px-3 py-2 text-sm bg-white border border-black/10 rounded-xl focus:outline-none focus:border-black/30 transition-colors"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-black uppercase tracking-widest opacity-50">Chave da API</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder="••••••••••••"
+              autoComplete="off"
+              className="w-full px-3 py-2 text-sm bg-white border border-black/10 rounded-xl focus:outline-none focus:border-black/30 transition-colors font-mono"
+            />
+            <p className="text-[10px] opacity-40">A chave é usada apenas nesta requisição e não é armazenada.</p>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 bg-black/[0.02] border-t border-black/5 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-5 py-2.5 bg-white border border-black/10 text-black rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black/5 transition-all">
+            Cancelar
+          </button>
+          <button
+            onClick={submit}
+            disabled={syncing}
+            className="px-5 py-2.5 bg-black text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-neutral-800 transition-all active:scale-95 disabled:opacity-40 flex items-center gap-2"
+          >
+            <RefreshCcw size={13} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Sincronizando…' : 'Sincronizar'}
+          </button>
+        </div>
+      </motion.div>
     </div>
   );
 }

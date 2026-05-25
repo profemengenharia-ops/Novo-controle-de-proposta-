@@ -8,7 +8,8 @@ import { toast } from 'sonner';
 import { Client, Obra, ObraStatus, ObraType } from '../types';
 import { obraService } from '../services/obraService';
 import { useAuth } from '../hooks/useAuth';
-import { cn, formatDate } from '../lib/utils';
+import { cn, formatDate, maskCEPInput, fetchAddressByCEP } from '../lib/utils';
+import { useConfirm } from './ConfirmDialog';
 
 interface Props {
   client: Client;
@@ -70,6 +71,7 @@ const emptyObraFor = (clientId: string): Obra => ({
 
 export function ObraList({ client }: Props) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [obras, setObras] = useState<Obra[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Obra | null>(null);
@@ -109,7 +111,13 @@ export function ObraList({ client }: Props) {
   };
 
   const handleDelete = async (o: Obra) => {
-    if (!confirm(`Excluir obra "${o.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Excluir obra',
+      message: <>Excluir a obra <b>{o.name}</b>?</>,
+      confirmLabel: 'Excluir',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await obraService.delete(o.id);
       toast.success('Obra excluída');
@@ -121,7 +129,12 @@ export function ObraList({ client }: Props) {
   };
 
   const handleRequestBudget = async (o: Obra) => {
-    if (!confirm(`Enviar a obra "${o.name}" para o setor de Orçamentos?`)) return;
+    const ok = await confirm({
+      title: 'Solicitar orçamento',
+      message: <>Enviar a obra <b>{o.name}</b> para o setor de Orçamentos?</>,
+      confirmLabel: 'Enviar',
+    });
+    if (!ok) return;
     try {
       await obraService.update(o.id, { status: 'aguardando_orcamento' });
       toast.success('Obra enviada para Orçamentos');
@@ -280,6 +293,7 @@ export function ObraList({ client }: Props) {
         {showModal && editing && (
           <ObraFormModal
             initial={editing}
+            client={client}
             onClose={() => { setShowModal(false); setEditing(null); }}
             onSaved={load}
             userId={user?.id ?? 'mock-user'}
@@ -308,17 +322,53 @@ function StatCard({ label, value, color }: { label: string; value: number; color
 
 interface ModalProps {
   initial: Obra;
+  client: Client;
   onClose: () => void;
   onSaved: () => void;
   userId: string;
 }
 
-function ObraFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
+function ObraFormModal({ initial, client, onClose, onSaved, userId }: ModalProps) {
   const isNew = !initial.id;
   const [form, setForm] = useState<Obra>(initial);
   const [saving, setSaving] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
 
   const set = <K extends keyof Obra>(k: K, v: Obra[K]) => setForm(f => ({ ...f, [k]: v }));
+
+  // Copia o endereço de cobrança do cliente para a obra.
+  const useClientAddress = () => {
+    setForm(f => ({
+      ...f,
+      address: client.billingAddress ?? f.address,
+      city: client.city ?? f.city,
+      state: client.state ?? f.state,
+      cep: client.cep ?? f.cep,
+    }));
+    toast.success('Endereço do cliente copiado.');
+  };
+
+  // Busca endereço pelo CEP (ViaCEP).
+  const handleCepLookup = async () => {
+    const digits = (form.cep ?? '').replace(/\D/g, '');
+    if (digits.length !== 8) return;
+    setCepLoading(true);
+    try {
+      const addr = await fetchAddressByCEP(digits);
+      if (!addr) { toast.error('CEP não encontrado.'); return; }
+      setForm(f => ({
+        ...f,
+        city: addr.city ?? f.city,
+        state: addr.state ?? f.state,
+        address: f.address?.trim() ? f.address : [addr.street, addr.neighborhood].filter(Boolean).join(' - '),
+      }));
+      toast.success('Endereço preenchido pelo CEP.');
+    } finally {
+      setCepLoading(false);
+    }
+  };
+
+  const hasClientAddress = Boolean(client.billingAddress || client.city || client.cep);
 
   const handleSave = async () => {
     if (!form.name.trim()) {
@@ -418,7 +468,18 @@ function ObraFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
           </section>
 
           <section className="space-y-3">
-            <h4 className="text-[10px] font-black uppercase tracking-widest opacity-50">Localização</h4>
+            <div className="flex items-center justify-between">
+              <h4 className="text-[10px] font-black uppercase tracking-widest opacity-50">Localização</h4>
+              {hasClientAddress && (
+                <button
+                  type="button"
+                  onClick={useClientAddress}
+                  className="text-[10px] font-black uppercase tracking-widest text-orange-500 hover:text-orange-600 flex items-center gap-1"
+                >
+                  <MapPin size={11} /> Usar endereço do cliente
+                </button>
+              )}
+            </div>
             <div className="grid grid-cols-6 gap-3">
               <Field label="Endereço" col={4}>
                 <input
@@ -428,11 +489,19 @@ function ObraFormModal({ initial, onClose, onSaved, userId }: ModalProps) {
                 />
               </Field>
               <Field label="CEP" col={2}>
-                <input
-                  value={form.cep ?? ''}
-                  onChange={e => set('cep', e.target.value)}
-                  className={inputCls}
-                />
+                <div className="relative">
+                  <input
+                    value={form.cep ?? ''}
+                    onChange={e => set('cep', maskCEPInput(e.target.value))}
+                    onBlur={handleCepLookup}
+                    inputMode="numeric"
+                    placeholder="00000-000"
+                    className={inputCls}
+                  />
+                  {cepLoading && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-orange-500" />
+                  )}
+                </div>
               </Field>
               <Field label="Cidade" col={4}>
                 <input

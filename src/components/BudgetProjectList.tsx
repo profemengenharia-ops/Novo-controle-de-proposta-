@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { useConfirm } from './ConfirmDialog';
 
 interface Props {
   onOpen: (project: BudgetProject) => void;
@@ -45,6 +46,7 @@ const EMPTY_FORM: NewProjectForm = {
 
 export function BudgetProjectList({ onOpen }: Props) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [projects, setProjects] = useState<BudgetProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -87,7 +89,13 @@ export function BudgetProjectList({ onOpen }: Props) {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm('Excluir este orçamento permanentemente?')) return;
+    const ok = await confirm({
+      title: 'Excluir orçamento',
+      message: 'Excluir este orçamento permanentemente? Esta ação não pode ser desfeita.',
+      confirmLabel: 'Excluir',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await budgetProjectService.delete(id);
     toast.success('Orçamento excluído.');
     load();

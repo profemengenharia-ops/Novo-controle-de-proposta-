@@ -11,6 +11,7 @@ import { clientService } from '../services/clientService';
 import { budgetProjectService } from '../services/budgetProjectService';
 import { useAuth } from '../hooks/useAuth';
 import { cn, formatDate } from '../lib/utils';
+import { useConfirm } from './ConfirmDialog';
 
 interface Props {
   /** Called after "Assumir" — opens the new BudgetProject in the editor */
@@ -26,6 +27,7 @@ interface InboxItem {
 
 export function OrcamentosInbox({ onAssume, refreshSignal }: Props) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [assuming, setAssuming] = useState<string | null>(null);
@@ -60,7 +62,12 @@ export function OrcamentosInbox({ onAssume, refreshSignal }: Props) {
   useEffect(() => { load(); }, [load, refreshSignal]);
 
   const handleAssume = async (item: InboxItem) => {
-    if (!confirm(`Assumir orçamento da obra "${item.obra.name}" (${item.client.companyName})?`)) return;
+    const ok = await confirm({
+      title: 'Assumir orçamento',
+      message: <>Assumir o orçamento da obra <b>{item.obra.name}</b> ({item.client.companyName})?</>,
+      confirmLabel: 'Assumir',
+    });
+    if (!ok) return;
     setAssuming(item.obra.id);
     try {
       // 1. Cria o BudgetProject com os FKs do cliente e da obra
