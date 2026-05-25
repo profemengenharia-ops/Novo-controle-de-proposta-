@@ -28,6 +28,7 @@ import {
 import { formatCurrency, formatDate, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { STATUS_TAGS } from '../constants';
+import { downloadProposalDocx } from '../lib/proposalDocx';
 import { toast } from 'sonner';
 
 interface ProposalListProps {
@@ -71,6 +72,17 @@ export function ProposalList({ onEdit }: ProposalListProps) {
 
   const handleDelete = (id: string) => {
     setConfirmDeleteId(id);
+  };
+
+  const handleDownloadDocx = async (p: Proposal) => {
+    try {
+      toast.loading('Gerando documento Word…', { id: `docx-${p.id}` });
+      await downloadProposalDocx(p);
+      toast.success('Documento Word gerado com sucesso!', { id: `docx-${p.id}` });
+    } catch (err) {
+      console.error('[docx] Falha ao gerar proposta:', err);
+      toast.error('Não foi possível gerar o documento Word.', { id: `docx-${p.id}` });
+    }
   };
 
   const confirmDelete = async () => {
@@ -285,6 +297,9 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             </button>
                             <button onClick={() => { window.open(`/proposal/${p.id}?print=1`, '_blank'); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Download size={14} className="opacity-40" /> Baixar PDF
+                            </button>
+                            <button onClick={() => { handleDownloadDocx(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                              <FileText size={14} className="opacity-40" /> Baixar Word (.docx)
                             </button>
                             <button onClick={() => { setInteractionId(p.id); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-[var(--color-brand-primary)]/10 text-[var(--color-brand-primary)] font-bold transition-colors">
                               <MessageSquare size={14} className="opacity-40" /> Registrar Interação
