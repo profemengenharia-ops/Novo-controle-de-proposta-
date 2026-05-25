@@ -35,6 +35,7 @@ import { toast } from 'sonner';
 import { STATUS_TAGS } from '../constants';
 import { useConfirm } from './ConfirmDialog';
 import { ProposalPrintView } from './ProposalPrintView';
+import { downloadProposalDocx } from '../lib/proposalDocx';
 
 interface ProposalListProps {
   onEdit: (id: string) => void;
@@ -212,6 +213,17 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     setFollowUpId(p.id);
   };
 
+  const handleDownloadDocx = async (p: Proposal) => {
+    try {
+      toast.loading('Gerando documento Word…', { id: `docx-${p.id}` });
+      await downloadProposalDocx(p);
+      toast.success('Documento Word gerado com sucesso!', { id: `docx-${p.id}` });
+    } catch (err) {
+      console.error('[docx] Falha ao gerar proposta:', err);
+      toast.error('Não foi possível gerar o documento Word.', { id: `docx-${p.id}` });
+    }
+  };
+
   const dateInDays = (days: number) => {
     const d = new Date();
     d.setDate(d.getDate() + days);
@@ -375,6 +387,9 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             </button>
                             <button onClick={() => { setPdfProposal(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Download size={14} className="opacity-40" /> Baixar PDF
+                            </button>
+                            <button onClick={() => { handleDownloadDocx(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                              <FileText size={14} className="opacity-40" /> Baixar Word (.docx)
                             </button>
                             <button onClick={() => { openReschedule(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Calendar size={14} className="opacity-40" /> Reagendar Follow-up
