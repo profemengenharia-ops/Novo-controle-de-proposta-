@@ -26,7 +26,11 @@ import { Logo } from './components/Logo';
 
 function AppContent() {
   const { user, loading, signIn } = useAuth();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === 'undefined') return 'dashboard';
+    if (window.location.pathname.startsWith('/proposal/')) return 'dashboard';
+    return window.location.hash.replace(/^#/, '') || 'dashboard';
+  });
   const [isPublic, setIsPublic] = useState(false);
   const [publicId, setPublicId] = useState('');
   const [printMode, setPrintMode] = useState(false);
@@ -43,13 +47,33 @@ function AppContent() {
     }
   }, []);
 
+  // Sincroniza a aba ativa com o hash da URL: permite atualizar a página,
+  // usar voltar/avançar do navegador e compartilhar links de telas internas.
+  useEffect(() => {
+    if (window.location.pathname.startsWith('/proposal/')) return;
+    const onHashChange = () => {
+      setActiveTab(window.location.hash.replace(/^#/, '') || 'dashboard');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (window.location.pathname.startsWith('/proposal/')) return;
+    const target = `#${activeTab}`;
+    if (window.location.hash !== target) {
+      window.history.pushState(null, '', target);
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     if (user) {
       proposalService.getAllProposals().then(setProposals);
       
+      const disabled = localStorage.getItem('radarDisabled') === '1';
       const lastRadar = localStorage.getItem('lastRadarShow');
       const today = new Date().toDateString();
-      if (lastRadar !== today) {
+      if (!disabled && lastRadar !== today) {
         setShowRadar(true);
         localStorage.setItem('lastRadarShow', today);
       }

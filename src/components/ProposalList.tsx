@@ -49,6 +49,7 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   const [lossReason, setLossReason] = useState('');
   const [activeTab, setActiveTab] = useState<Record<string, 'overview' | 'technical' | 'commercial' | 'history'>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const setProposalTab = (id: string, tab: 'overview' | 'technical' | 'commercial' | 'history') => {
     setActiveTab(prev => ({ ...prev, [id]: tab }));
@@ -56,11 +57,28 @@ export function ProposalList({ onEdit }: ProposalListProps) {
 
   useEffect(() => {
     async function load() {
-      const data = await proposalService.getAllProposals();
-      setProposals(data);
+      try {
+        const data = await proposalService.getAllProposals();
+        setProposals(data);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
+
+  // Fecha o menu de ações ao clicar fora ou pressionar Esc.
+  useEffect(() => {
+    if (!activeActionsMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setActiveActionsMenu(null); };
+    const onClick = () => setActiveActionsMenu(null);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('click', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('click', onClick);
+    };
+  }, [activeActionsMenu]);
 
   const filteredProposals = proposals.filter(p => {
     const searchTerm = filter.toLowerCase();
@@ -303,7 +321,9 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                   </td>
                   <td className="px-8 py-5 text-right relative">
                     <div className="flex items-center justify-end gap-2">
-                       <button 
+                       <button
+                        aria-label="Ações da proposta"
+                        aria-haspopup="true"
                         onClick={(e) => { e.stopPropagation(); setActiveActionsMenu(activeActionsMenu === p.id ? null : p.id) }}
                         className="p-2 hover:bg-black/5 rounded-lg text-black/60 transition-all"
                        >
@@ -629,7 +649,13 @@ export function ProposalList({ onEdit }: ProposalListProps) {
           </tbody>
         </table>
         
-        {filteredProposals.length === 0 && (
+        {loading ? (
+          <div className="p-8 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-14 bg-black/5 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : filteredProposals.length === 0 && (
           <div className="p-20 text-center space-y-4">
              <div className="mx-auto w-16 h-16 bg-black/5 rounded-full flex items-center justify-center opacity-40">
                <Search size={32} />

@@ -116,6 +116,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [clients, setClients] = useState<CRMClient[]>([]);
   const [normSearch, setNormSearch] = useState('');
   const [newLocation, setNewLocation] = useState('');
+  const [isDirty, setIsDirty] = useState(false);
+  const [maxStepReached, setMaxStepReached] = useState(1);
   
   const [proposal, setProposal] = useState<Partial<Proposal>>({
     clientName: '',
@@ -191,6 +193,17 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     crmService.getClients().then(setClients).catch(console.error);
   }, []);
 
+  // Marca a maior etapa já alcançada (para permitir voltar/pular para etapas visitadas).
+  useEffect(() => { setMaxStepReached(m => Math.max(m, step)); }, [step]);
+
+  // Avisa ao fechar/atualizar a aba se houver alterações não salvas.
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
+
   const handleSave = async () => {
     const errors: { clientName?: string; scopeTitle?: string } = {};
     if (!proposal.clientName?.trim()) errors.clientName = 'Informe o nome do cliente.';
@@ -244,6 +257,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
         });
       }
       toast.success(proposal.id ? 'Proposta atualizada com sucesso!' : 'Proposta criada com sucesso!');
+      setIsDirty(false);
       onComplete();
     } catch (e) {
       console.error(e);
@@ -512,7 +526,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8" onChange={() => { if (!isDirty) setIsDirty(true); }}>
         {/* Main Content Area */}
         <div className="lg:col-span-3 space-y-8">
           {showPreview ? (
@@ -525,7 +539,16 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
               <div className="flex items-center justify-between px-12">
                 {steps.map((s, i) => (
                   <React.Fragment key={i}>
-                    <div className="flex flex-col items-center space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => { if (i + 1 <= maxStepReached) setStep(i + 1); }}
+                      disabled={i + 1 > maxStepReached}
+                      aria-label={`Ir para a etapa ${s.title}`}
+                      className={cn(
+                        "flex flex-col items-center space-y-2 transition-opacity",
+                        i + 1 <= maxStepReached ? "cursor-pointer hover:opacity-80" : "cursor-default"
+                      )}
+                    >
                       <div className={cn(
                         "w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all",
                         step >= i + 1 ? "bg-[var(--color-brand-primary)] text-white" : "bg-black/5 text-black/40"
@@ -535,7 +558,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                       <span className={cn("text-[10px] font-bold uppercase tracking-widest", step >= i + 1 ? "opacity-100" : "opacity-30")}>
                         {s.title}
                       </span>
-                    </div>
+                    </button>
                     {i < steps.length - 1 && <div className="flex-1 h-[2px] bg-black/5 mx-4" />}
                   </React.Fragment>
                 ))}
@@ -749,7 +772,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                            {(proposal.technicalScope?.locations || []).map((loc, i) => (
                              <div key={i} className="flex items-center justify-between bg-black/5 px-3 py-2 rounded-lg text-sm font-medium">
                                <span className="flex items-center gap-2"><MapPin size={14} className="text-[var(--color-brand-primary)] shrink-0" /> {loc}</span>
-                               <button onClick={() => updateTechnical('locations', (proposal.technicalScope?.locations || []).filter((_, idx) => idx !== i))}>
+                               <button aria-label="Remover unidade" onClick={() => updateTechnical('locations', (proposal.technicalScope?.locations || []).filter((_, idx) => idx !== i))}>
                                  <Trash2 size={14} className="text-red-500" />
                                </button>
                              </div>
@@ -794,7 +817,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                 ) : (
                                   ref
                                 )}
-                                <button onClick={() => updateTechnical('references', (proposal.technicalScope?.references || []).filter((_, idx) => idx !== i))}>
+                                <button aria-label="Remover referência" onClick={() => updateTechnical('references', (proposal.technicalScope?.references || []).filter((_, idx) => idx !== i))}>
                                   <Trash2 size={12} className="text-red-500" />
                                 </button>
                               </div>
@@ -970,7 +993,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                         <div className="space-y-4">
                           {proposal.technicalScope?.items?.map((item, i) => (
                             <div key={i} className="group bg-black/5 p-6 rounded-xl space-y-4 relative">
-                               <button 
+                               <button
+                                aria-label="Remover item do escopo"
                                 onClick={() => updateTechnical('items', proposal.technicalScope!.items.filter((_, idx) => idx !== i))}
                                 className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"
                                >
@@ -1066,7 +1090,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                       </select>
                                     </td>
                                     <td className="px-2 py-2 text-right">
-                                      <button onClick={() => removeMaintenanceRow(task.id)}>
+                                      <button aria-label="Remover linha" onClick={() => removeMaintenanceRow(task.id)}>
                                         <Trash2 size={14} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                                       </button>
                                     </td>
@@ -1228,7 +1252,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                       )}
                                     </td>
                                     <td className="px-2 py-2 text-right">
-                                      <button onClick={() => updateCommercial('items', proposal.commercialProposal!.items.filter((_, idx) => idx !== i))}>
+                                      <button aria-label="Remover item" onClick={() => updateCommercial('items', proposal.commercialProposal!.items.filter((_, idx) => idx !== i))}>
                                         <Trash2 size={14} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                                       </button>
                                     </td>
@@ -1284,7 +1308,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                      placeholder="0,00"
                                      className="w-28 p-2 bg-black/5 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
                                    />
-                                   <button onClick={() => removeOnDemandService(svc.id)} className="p-1">
+                                   <button aria-label="Remover serviço" onClick={() => removeOnDemandService(svc.id)} className="p-1">
                                      <Trash2 size={14} className="text-red-500" />
                                    </button>
                                  </div>
@@ -1320,10 +1344,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
 
                          <div className="space-y-6 flex flex-col justify-between">
                             <div className="space-y-4">
-                               <div className="flex items-center justify-between">
-                                 <span className="text-xs font-bold uppercase tracking-widest opacity-40">Subtotal</span>
-                                 <span className="font-mono text-sm">{formatCurrency(calculateTotal(proposal.commercialProposal?.items || []))}</span>
-                               </div>
                                <div className="flex items-center justify-between text-[var(--color-brand-primary)]">
                                  <span className="text-xs font-bold uppercase tracking-widest">Valor Total do Contrato</span>
                                  <span className="font-bold text-2xl tracking-tighter">
@@ -1440,20 +1460,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
               </div>
             </div>
 
-            <div className="bg-[var(--color-brand-dark)] text-white p-6 rounded-2xl space-y-4">
-               <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">Anexos Inteligentes</h3>
-               <div className="space-y-3">
-                  {['Folder Corporativo', 'Tabela de Bombas', 'Certificações NR'].map(file => (
-                    <div key={file} className="flex items-center justify-between text-xs p-2 bg-white/5 rounded-lg hover:bg-white/10 cursor-pointer transition-colors">
-                      <span>{file}.pdf</span>
-                      <Plus size={12} className="opacity-40" />
-                    </div>
-                  ))}
-               </div>
-               <p className="text-[9px] opacity-40 leading-relaxed italic">
-                 Anexos selecionados serão "costurados" automaticamente ao PDF final.
-               </p>
-            </div>
           </div>
         )}
       </div>
