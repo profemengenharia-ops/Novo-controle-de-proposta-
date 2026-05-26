@@ -604,14 +604,18 @@ function ObrasTab({
         finalPrice: row.budget.finalPrice,
       });
 
+      // Distribui indiretos + BDI proporcionalmente sobre os itens, para que a
+      // soma das linhas iguale o finalPrice sem expor o custo direto ao cliente.
+      const markup = row.budget.totalDirectCost > 0 ? row.budget.finalPrice / row.budget.totalDirectCost : 1;
       const newId = await proposalService.createProposal({
         clientName: row.opp.clientName,
-        proposalNumber: `ORC-${Date.now()}`,
-        revision: '0',
+        proposalNumber: `PF-${new Date().getFullYear()}-${crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4)}`,
+        revision: '00',
         status: ProposalStatus.DRAFT,
         validityDays: 30,
         deadline: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
         createdBy,
+        vendorId: row.opp.vendorId,
         technicalScope: {
           generalConsiderations: row.budget.notes ?? '',
           references: [], norms: [], items: [], safetyNotes: '', exclusions: [],
@@ -622,7 +626,7 @@ function ObrasTab({
           paymentTerms: '', reajuste: '', guarantee: '',
           items: row.budget.stages.flatMap(st => st.items.map(i => ({
             id: i.id, description: i.description, quantity: i.quantity, unit: i.unit,
-            unitPrice: i.unitCost, totalPrice: i.totalCost, source: 'engineering' as const,
+            unitPrice: i.unitCost * markup, totalPrice: i.totalCost * markup, source: 'engineering' as const,
           }))),
         },
         scopeTitle: row.opp.title,
@@ -827,14 +831,18 @@ function MonitoramentoTab({
     if (!onNavigate) return;
     setGenerating(row.opp.id);
     try {
+      // Distribui indiretos + BDI proporcionalmente sobre os itens, para que a
+      // soma das linhas iguale o finalPrice sem expor o custo direto ao cliente.
+      const markup = row.budget.totalDirectCost > 0 ? row.budget.finalPrice / row.budget.totalDirectCost : 1;
       const newId = await proposalService.createProposal({
         clientName: row.opp.clientName,
-        proposalNumber: `ORC-${Date.now()}`,
-        revision: '0',
+        proposalNumber: `PF-${new Date().getFullYear()}-${crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4)}`,
+        revision: '00',
         status: ProposalStatus.DRAFT,
         validityDays: 30,
         deadline: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
         createdBy,
+        vendorId: row.opp.vendorId,
         technicalScope: {
           generalConsiderations: row.budget.notes ?? '',
           references: [], norms: [], items: [], safetyNotes: '', exclusions: [],
@@ -845,7 +853,7 @@ function MonitoramentoTab({
           paymentTerms: '', reajuste: '', guarantee: '',
           items: row.budget.stages.flatMap(st => st.items.map(i => ({
             id: i.id, description: i.description, quantity: i.quantity, unit: i.unit,
-            unitPrice: i.unitCost, totalPrice: i.totalCost, source: 'engineering' as const,
+            unitPrice: i.unitCost * markup, totalPrice: i.totalCost * markup, source: 'engineering' as const,
           }))),
         },
         scopeTitle: row.opp.title,

@@ -1,7 +1,34 @@
 import { supabase, isMockMode } from '../lib/supabase';
-import { Proposal, ProposalRevision, ProposalStatus } from '../types';
+import { Proposal, ProposalRevision, ProposalStatus, OpportunityStage } from '../types';
+import { crmService } from './crmService';
 
 const TABLE_NAME = 'proposals';
+
+/**
+ * Fecha o ciclo cliente → obra → orçamento → proposta de volta no CRM:
+ * quando a proposta muda de status, o estágio da oportunidade vinculada
+ * (via linkedProposalId) acompanha. Best-effort — nunca bloqueia o save.
+ */
+const PROPOSAL_TO_OPP_STAGE: Partial<Record<ProposalStatus, OpportunityStage>> = {
+  [ProposalStatus.NEGOTIATING]: 'negotiation',
+  [ProposalStatus.WON]: 'won',
+  [ProposalStatus.LOST]: 'lost',
+};
+
+async function syncLinkedOpportunityStage(proposalId: string, status?: ProposalStatus): Promise<void> {
+  if (!status) return;
+  const stage = PROPOSAL_TO_OPP_STAGE[status];
+  if (!stage) return;
+  try {
+    const opps = await crmService.getOpportunities();
+    const linked = opps.find(o => o.linkedProposalId === proposalId);
+    if (linked && linked.stage !== stage) {
+      await crmService.updateOpportunity(linked.id, { stage });
+    }
+  } catch (e) {
+    console.warn('Falha ao sincronizar estágio da oportunidade vinculada:', e);
+  }
+}
 
 const MOCK_STORAGE_KEY = 'mock_proposals_v1';
 
@@ -167,6 +194,7 @@ export const proposalService = {
         };
         saveMockStore(store);
       }
+      await syncLinkedOpportunityStage(id, updates.status);
       return;
     }
 
@@ -186,6 +214,7 @@ export const proposalService = {
       .update(finalUpdates)
       .eq('id', id);
     if (error) throw error;
+    await syncLinkedOpportunityStage(id, updates.status);
   },
 
   async deleteProposal(id: string): Promise<void> {
