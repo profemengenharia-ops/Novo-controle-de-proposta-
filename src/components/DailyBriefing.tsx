@@ -235,12 +235,20 @@ export function DailyBriefing({ proposals, onClose, onAction }: DailyBriefingPro
           )}
         </AnimatePresence>
 
-        <div className="p-8 border-t border-black/5 bg-black/[0.01] flex justify-center">
-           <button 
+        <div className="p-8 border-t border-black/5 bg-black/[0.01] flex flex-col sm:flex-row items-center justify-center gap-4">
+           <button
             onClick={onClose}
             className="text-xs font-bold uppercase tracking-widest opacity-40 hover:opacity-100 transition-opacity"
            >
              Fechar Radar e Ir para o Painel
+           </button>
+           <span className="hidden sm:block opacity-20">·</span>
+           <button
+            onClick={() => { localStorage.setItem('radarDisabled', '1'); onClose(); }}
+            className="text-[10px] font-bold uppercase tracking-widest opacity-30 hover:opacity-70 transition-opacity"
+            title="Você pode reativar limpando os dados do navegador"
+           >
+             Não abrir automaticamente
            </button>
         </div>
       </motion.div>

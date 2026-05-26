@@ -24,13 +24,12 @@ export function PricingFormulation({ proposal, onChange, onApply }: PricingFormu
       others: 0
     },
     bdi: {
-      indirectExpenses: 5,
       centralAdmin: 3,
+      financialExpenses: 1.5,
+      insuranceAndGuarantees: 1,
       risks: 2,
-      guarantees: 1,
-      financial: 1.5,
-      taxes: 13.15,
-      profitMargin: 15
+      profit: 15,
+      taxes: 13.15
     }
   };
 
@@ -85,15 +84,11 @@ export function PricingFormulation({ proposal, onChange, onApply }: PricingFormu
     netProfit,
     realMarginPercent,
     status,
-    calculatedBDI // Note: I should add calculatedBDI back to the hook or compute it here
+    calculatedBDI
   } = usePricingEngine(
     pricing.items.map(i => ({ unitCost: i.unitCost, quantity: i.quantity })),
-    {
-      taxRate: pricing.bdi.taxes / 100,
-      adminOverhead: (pricing.bdi.centralAdmin + pricing.bdi.indirectExpenses + pricing.bdi.risks + pricing.bdi.guarantees) / 100,
-      desiredMargin: pricing.bdi.profitMargin / 100,
-      indirectCosts: totalIndirectCost
-    }
+    totalIndirectCost,
+    pricing.bdi
   );
 
   const totalDirectCost = pricing.items.reduce((acc, i) => acc + i.totalCost, 0);
@@ -320,17 +315,16 @@ export function PricingFormulation({ proposal, onChange, onApply }: PricingFormu
               <h3 className="text-xs font-black uppercase tracking-widest text-neutral-900">BDI (Benefícios e Despesas Indiretas)</h3>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <PercentInput label="Desp. Indiretas" value={pricing.bdi.indirectExpenses} onChange={v => updateBdi('indirectExpenses', v)} />
               <PercentInput label="Adm. Central" value={pricing.bdi.centralAdmin} onChange={v => updateBdi('centralAdmin', v)} />
+              <PercentInput label="Despesas Financeiras" value={pricing.bdi.financialExpenses} onChange={v => updateBdi('financialExpenses', v)} />
+              <PercentInput label="Seguros & Garantias" value={pricing.bdi.insuranceAndGuarantees} onChange={v => updateBdi('insuranceAndGuarantees', v)} />
               <PercentInput label="Riscos" value={pricing.bdi.risks} onChange={v => updateBdi('risks', v)} />
-              <PercentInput label="Garantias" value={pricing.bdi.guarantees} onChange={v => updateBdi('guarantees', v)} />
-              <PercentInput label="Financeiras" value={pricing.bdi.financial} onChange={v => updateBdi('financial', v)} />
               <PercentInput label="Tributos" value={pricing.bdi.taxes} onChange={v => updateBdi('taxes', v)} />
-              <PercentInput label="Margem de Lucro" value={pricing.bdi.profitMargin} onChange={v => updateBdi('profitMargin', v)} />
+              <PercentInput label="Margem de Lucro" value={pricing.bdi.profit} onChange={v => updateBdi('profit', v)} />
             </div>
             <div className="p-4 bg-orange-50/50 rounded-xl border border-orange-100/50 text-center">
               <p className="text-[10px] font-bold uppercase tracking-widest text-orange-500 mb-1">BDI Calculado (Real)</p>
-              <p className="text-2xl font-black text-orange-600 tracking-tighter">{((suggestedPrice / totalBaseCost - 1) * 100).toFixed(2)}%</p>
+              <p className="text-2xl font-black text-orange-600 tracking-tighter">{calculatedBDI.toFixed(2)}%</p>
             </div>
             <button className="w-full py-2 text-[8px] font-black uppercase tracking-[0.2em] text-neutral-400 hover:text-neutral-900 transition-colors">
               Salvar Configuração como Padrão
@@ -427,9 +421,9 @@ export function PricingFormulation({ proposal, onChange, onApply }: PricingFormu
                 {realMargin >= 10 && realMargin < 20 && "Sua margem está no intervalo de mercado. Verifique os riscos para garantir o lucro."}
                 {realMargin >= 20 && "Excelente formação! Margem saudável que permite negociação se necessário."}
               </p>
-              {realMargin < 15 && (
+              {realMargin < 15 && salePrice > 0 && (
                 <p className="mt-2 text-xs font-bold text-orange-600">
-                  💡 Sugestão: Ajustar preço em {((totalBaseCost * 1.15 - salePrice) / salePrice * 100).toFixed(1)}% para atingir 15% de margem.
+                  💡 Sugestão: Ajustar preço em {((totalBaseCost / 0.85 - salePrice) / salePrice * 100).toFixed(1)}% para atingir 15% de margem.
                 </p>
               )}
             </div>

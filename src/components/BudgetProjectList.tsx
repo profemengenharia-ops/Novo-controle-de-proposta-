@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, FileText, MapPin, User, Trash2, ChevronRight, X, FolderOpen } from 'lucide-react';
-import { BudgetProject, BudgetStatus } from '../types';
+import { Plus, Search, FileText, MapPin, User, Trash2, ChevronRight, X, FolderOpen, ArrowUpDown, Briefcase } from 'lucide-react';
+import { BudgetProject, BudgetStatus, CRMClient } from '../types';
 import { budgetProjectService } from '../services/budgetProjectService';
+import { crmService } from '../services/crmService';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { confirmAction } from '../hooks/useConfirm';
 
 interface Props {
   onOpen: (project: BudgetProject) => void;
@@ -48,9 +50,14 @@ export function BudgetProjectList({ onOpen }: Props) {
   const [projects, setProjects] = useState<BudgetProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<BudgetStatus | null>(null);
+  const [sortBy, setSortBy] = useState<'updated' | 'price_desc' | 'price_asc' | 'name'>('updated');
+  const [searchField, setSearchField] = useState<'both' | 'title' | 'client'>('both');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<NewProjectForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [clients, setClients] = useState<CRMClient[]>([]);
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -59,12 +66,33 @@ export function BudgetProjectList({ onOpen }: Props) {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    crmService.getClients().then(setClients);
+  }, []);
 
-  const filtered = projects.filter(p =>
-    p.title.toLowerCase().includes(search.toLowerCase()) ||
-    p.clientName.toLowerCase().includes(search.toLowerCase())
-  );
+  const clientSuggestions = form.clientName.length > 0
+    ? clients.filter(c =>
+        c.name.toLowerCase().includes(form.clientName.toLowerCase()) ||
+        c.company?.toLowerCase().includes(form.clientName.toLowerCase())
+      ).slice(0, 6)
+    : [];
+
+  const filtered = projects
+    .filter(p => !statusFilter || p.status === statusFilter)
+    .filter(p => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      if (searchField === 'title') return p.title.toLowerCase().includes(q);
+      if (searchField === 'client') return p.clientName.toLowerCase().includes(q);
+      return p.title.toLowerCase().includes(q) || p.clientName.toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      if (sortBy === 'price_desc') return b.finalPrice - a.finalPrice;
+      if (sortBy === 'price_asc') return a.finalPrice - b.finalPrice;
+      if (sortBy === 'name') return a.title.localeCompare(b.title);
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,10 +115,20 @@ export function BudgetProjectList({ onOpen }: Props) {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm('Excluir este orçamento permanentemente?')) return;
-    await budgetProjectService.delete(id);
-    toast.success('Orçamento excluído.');
-    load();
+    const ok = await confirmAction({
+      title: 'Excluir orçamento?',
+      description: 'Esta ação é permanente.',
+      confirmLabel: 'Excluir',
+    });
+    if (!ok) return;
+    try {
+      await budgetProjectService.delete(id);
+      toast.success('Orçamento excluído.');
+      load();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao excluir.');
+    }
   };
 
   const totalItems = (p: BudgetProject) => p.stages.reduce((s, st) => s + st.items.length, 0);
@@ -99,20 +137,61 @@ export function BudgetProjectList({ onOpen }: Props) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="relative max-w-md w-full">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-500/40" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por obra ou cliente..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-12 pr-10 py-4 bg-white border border-black/5 rounded-2xl text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all placeholder:text-black/20 font-medium"
-          />
-          {search && (
-            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-orange-50 rounded-lg text-orange-400 transition-all">
-              <X size={16} />
-            </button>
-          )}
+        <div className="flex gap-3 flex-1 max-w-2xl w-full">
+          <div className="flex-1 flex flex-col gap-1.5">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-500/40" size={18} />
+              <input
+                type="text"
+                placeholder={
+                  searchField === 'title' ? 'Buscar pelo nome da obra...' :
+                  searchField === 'client' ? 'Buscar pelo cliente...' :
+                  'Buscar por obra ou cliente...'
+                }
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-12 pr-10 py-4 bg-white border border-black/5 rounded-2xl text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all placeholder:text-black/20 font-medium"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-orange-50 rounded-lg text-orange-400 transition-all">
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <div className="flex gap-1 px-1">
+              {([
+                { value: 'both',   label: 'Obra + Cliente' },
+                { value: 'title',  label: 'Obra' },
+                { value: 'client', label: 'Cliente' },
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setSearchField(opt.value)}
+                  className={cn(
+                    'px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all',
+                    searchField === opt.value
+                      ? 'bg-orange-100 text-orange-700'
+                      : 'text-black/30 hover:text-black/60'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="relative">
+            <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30" size={15} />
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as typeof sortBy)}
+              className="pl-9 pr-4 py-4 bg-white border border-black/5 rounded-2xl text-xs font-bold shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500/20 appearance-none cursor-pointer"
+            >
+              <option value="updated">Mais recentes</option>
+              <option value="price_desc">Maior valor</option>
+              <option value="price_asc">Menor valor</option>
+              <option value="name">Nome A–Z</option>
+            </select>
+          </div>
         </div>
         <button
           onClick={() => setShowModal(true)}
@@ -134,15 +213,31 @@ export function BudgetProjectList({ onOpen }: Props) {
         </button>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — click to filter */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[BudgetStatus.DRAFT, BudgetStatus.APPROVED, BudgetStatus.EXECUTING, BudgetStatus.COMPLETED].map(s => (
-          <div key={s} className="bg-white rounded-2xl border border-black/5 shadow-sm p-5">
+          <button
+            key={s}
+            onClick={() => setStatusFilter(f => f === s ? null : s)}
+            className={cn(
+              'bg-white rounded-2xl border shadow-sm p-5 text-left transition-all hover:shadow-md',
+              statusFilter === s
+                ? 'border-orange-400 ring-1 ring-orange-400 bg-orange-50'
+                : 'border-black/5 hover:border-orange-200'
+            )}
+          >
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">{STATUS_LABEL[s]}</p>
             <p className="text-3xl font-black mt-1">{projects.filter(p => p.status === s).length}</p>
-          </div>
+          </button>
         ))}
       </div>
+      {statusFilter && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold opacity-40">Filtrando por:</span>
+          <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full">{STATUS_LABEL[statusFilter]}</span>
+          <button onClick={() => setStatusFilter(null)} className="text-xs font-bold text-orange-500 hover:underline">Limpar</button>
+        </div>
+      )}
 
       {/* List */}
       {loading ? (
@@ -176,6 +271,11 @@ export function BudgetProjectList({ onOpen }: Props) {
                   <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest', STATUS_COLOR[p.status])}>
                     {STATUS_LABEL[p.status]}
                   </span>
+                  {p.originOpportunityId && (
+                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 text-[10px] font-bold uppercase tracking-widest">
+                      <Briefcase size={10} /> Comercial
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-4 mt-1.5 flex-wrap">
                   <span className="flex items-center gap-1 text-xs font-medium opacity-50">
@@ -184,6 +284,11 @@ export function BudgetProjectList({ onOpen }: Props) {
                   {p.address && (
                     <span className="flex items-center gap-1 text-xs font-medium opacity-50">
                       <MapPin size={12} /> {p.address}
+                    </span>
+                  )}
+                  {p.requestedBy && (
+                    <span className="flex items-center gap-1 text-xs font-medium text-violet-500 opacity-70">
+                      <Briefcase size={12} /> Solicitado por {p.requestedBy}
                     </span>
                   )}
                   <span className="text-[10px] font-bold uppercase tracking-widest opacity-30">
@@ -247,14 +352,46 @@ export function BudgetProjectList({ onOpen }: Props) {
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest opacity-40">Cliente *</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="Nome do cliente ou empresa"
-                    className="w-full p-4 bg-black/5 rounded-2xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-black"
-                    value={form.clientName}
-                    onChange={e => setForm({ ...form, clientName: e.target.value })}
-                  />
+                  <div className="relative">
+                    <input
+                      required
+                      type="text"
+                      placeholder="Nome do cliente ou empresa"
+                      className="w-full p-4 bg-black/5 rounded-2xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-black"
+                      value={form.clientName}
+                      onChange={e => { setForm({ ...form, clientName: e.target.value }); setShowClientSuggestions(true); }}
+                      onFocus={() => setShowClientSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowClientSuggestions(false), 150)}
+                      autoComplete="off"
+                    />
+                    {showClientSuggestions && clientSuggestions.length > 0 && (
+                      <div className="absolute z-20 top-full mt-1.5 w-full bg-white border border-black/10 rounded-2xl shadow-xl overflow-hidden">
+                        {clientSuggestions.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onMouseDown={() => {
+                              setForm({ ...form, clientName: c.name });
+                              setShowClientSuggestions(false);
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-orange-50 transition-colors text-left border-b last:border-b-0 border-black/5"
+                          >
+                            <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center shrink-0 text-orange-600 font-bold text-xs">
+                              {c.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold">{c.name}</p>
+                              {(c.segment || c.city) && (
+                                <p className="text-[10px] opacity-40 font-bold uppercase tracking-widest">
+                                  {[c.segment, c.city].filter(Boolean).join(' · ')}
+                                </p>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">

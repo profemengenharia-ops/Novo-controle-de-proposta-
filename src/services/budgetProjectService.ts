@@ -2,6 +2,19 @@ import { supabase, isMockMode } from '../lib/supabase';
 import { BudgetProject, BudgetStatus, BudgetIndirectCosts, BudgetBDI } from '../types';
 
 const TABLE = 'budget_projects';
+const STORAGE_KEY = 'budget_projects_mock';
+
+function loadMockStore(): BudgetProject[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as BudgetProject[];
+  } catch {}
+  return MOCK_PROJECTS.map(p => ({ ...p }));
+}
+
+function persistMock(store: BudgetProject[]) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch {}
+}
 
 const defaultIndirectCosts = (): BudgetIndirectCosts => ({
   administration: 0,
@@ -41,6 +54,8 @@ const mapFromDb = (row: any): BudgetProject => ({
   updatedAt: row.updated_at,
   createdBy: row.created_by,
   linkedProposalId: row.linked_proposal_id,
+  originOpportunityId: row.origin_opportunity_id,
+  requestedBy: row.requested_by,
 });
 
 const mapToDb = (p: Partial<BudgetProject>) => {
@@ -59,6 +74,8 @@ const mapToDb = (p: Partial<BudgetProject>) => {
   if (p.totalBDI !== undefined) data.total_bdi = p.totalBDI;
   if (p.finalPrice !== undefined) data.final_price = p.finalPrice;
   if (p.linkedProposalId !== undefined) data.linked_proposal_id = p.linkedProposalId;
+  if (p.originOpportunityId !== undefined) data.origin_opportunity_id = p.originOpportunityId;
+  if (p.requestedBy !== undefined) data.requested_by = p.requestedBy;
   if (p.createdBy !== undefined) data.created_by = p.createdBy;
   return data;
 };
@@ -93,18 +110,18 @@ const MOCK_PROJECTS: BudgetProject[] = [
       },
     ],
     indirectCosts: defaultIndirectCosts(),
-    bdi: { ...defaultBDI(), calculatedBDI: 24.79 },
+    bdi: { ...defaultBDI(), calculatedBDI: 25.99 },
     totalDirectCost: 5600,
     totalIndirectCost: 0,
-    totalBDI: 1388.24,
-    finalPrice: 6988.24,
+    totalBDI: 1455.44,
+    finalPrice: 7055.44,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     createdBy: 'mock-user',
   },
 ];
 
-const MOCK_STORE = [...MOCK_PROJECTS];
+const MOCK_STORE: BudgetProject[] = loadMockStore();
 
 export const budgetProjectService = {
   async getAll(): Promise<BudgetProject[]> {
@@ -125,16 +142,20 @@ export const budgetProjectService = {
   },
 
   async create(
-    fields: Pick<BudgetProject, 'title' | 'clientName' | 'address' | 'responsible' | 'notes'>,
+    fields: Pick<BudgetProject, 'title' | 'clientName' | 'address' | 'responsible' | 'notes'> & {
+      originOpportunityId?: string;
+      requestedBy?: string;
+    },
     userId: string,
   ): Promise<string> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     
     if (isMockMode) {
+      const { originOpportunityId, requestedBy, ...coreFields } = fields;
       const newProject: BudgetProject = {
         id,
-        ...fields,
+        ...coreFields,
         status: BudgetStatus.DRAFT,
         stages: [],
         indirectCosts: defaultIndirectCosts(),
@@ -146,8 +167,11 @@ export const budgetProjectService = {
         createdAt: now,
         updatedAt: now,
         createdBy: userId,
+        originOpportunityId,
+        requestedBy,
       };
       MOCK_STORE.push(newProject);
+      persistMock(MOCK_STORE);
       return id;
     }
 
@@ -172,11 +196,12 @@ export const budgetProjectService = {
     if (isMockMode) {
       const idx = MOCK_STORE.findIndex(p => p.id === id);
       if (idx !== -1) {
-        MOCK_STORE[idx] = { 
-          ...MOCK_STORE[idx], 
-          ...updates, 
-          updatedAt: new Date().toISOString() 
+        MOCK_STORE[idx] = {
+          ...MOCK_STORE[idx],
+          ...updates,
+          updatedAt: new Date().toISOString()
         };
+        persistMock(MOCK_STORE);
       }
       return;
     }
@@ -187,7 +212,7 @@ export const budgetProjectService = {
   async delete(id: string): Promise<void> {
     if (isMockMode) {
       const idx = MOCK_STORE.findIndex(p => p.id === id);
-      if (idx !== -1) MOCK_STORE.splice(idx, 1);
+      if (idx !== -1) { MOCK_STORE.splice(idx, 1); persistMock(MOCK_STORE); }
       return;
     }
     const { error } = await supabase.from(TABLE).delete().eq('id', id);

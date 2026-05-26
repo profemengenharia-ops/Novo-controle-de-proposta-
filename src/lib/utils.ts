@@ -12,25 +12,29 @@ export function formatCurrency(value: number) {
   }).format(value);
 }
 
-export function formatDate(dateInput: any) {
-  if (!dateInput) return 'N/A';
-  
-  let date: Date;
-  
-  if (dateInput instanceof Date) {
-    date = dateInput;
-  } else if (typeof dateInput === 'string') {
-    date = new Date(dateInput);
-  } else if (dateInput && typeof dateInput.toDate === 'function') {
-    // Handle Firestore Timestamp
-    date = dateInput.toDate();
-  } else if (dateInput && dateInput.seconds) {
-    // Handle plain object representation of Timestamp
-    date = new Date(dateInput.seconds * 1000);
-  } else {
-    return 'Data inválida';
-  }
+/**
+ * Valor de um item no contrato inteiro: itens mensais multiplicam o total
+ * pelo nº de meses; itens de valor único usam o total como está.
+ */
+export function itemContractValue(item: {
+  totalPrice?: number;
+  billingType?: 'once' | 'monthly' | string;
+  contractMonths?: number;
+}): number {
+  const base = item.totalPrice || 0;
+  if (item.billingType === 'monthly') return base * (item.contractMonths || 1);
+  return base;
+}
 
+/** Soma do valor de contrato de todos os itens (recorrentes × meses + únicos). */
+export function proposalItemsTotal(items: Array<Parameters<typeof itemContractValue>[0]>): number {
+  return (items || []).reduce((acc, it) => acc + itemContractValue(it), 0);
+}
+
+export function formatDate(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return 'N/A';
+  const date = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (Number.isNaN(date.getTime())) return 'Data inválida';
   return date.toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -59,7 +63,6 @@ export function calculateBDI(config: {
 }): number {
   const { ac, sg, r, df, l, i } = config;
   
-  // Convert percentages to decimals if needed (assuming user inputs 5 for 5%)
   const fac = ac / 100;
   const fsg = sg / 100;
   const fr = r / 100;
@@ -67,39 +70,55 @@ export function calculateBDI(config: {
   const fl = l / 100;
   const fi = i / 100;
 
-  // Formula implementation
   const numerator = (1 + fac + fsg + fr) * (1 + fdf) * (1 + fl);
   const denominator = (1 - fi);
   
   if (denominator === 0) return 0;
-  
-  const bdiValue = (numerator / denominator) - 1;
-  return bdiValue;
+  return (numerator / denominator) - 1;
+}
+
+/**
+ * Tenta extrair o primeiro bloco JSON balanceado da string.
+ * Útil para respostas de IA com texto cercando o JSON.
+ */
+function extractBalancedJSON(text: string): string | null {
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch !== '{' && ch !== '[') continue;
+    const open = ch;
+    const close = ch === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (escape) { escape = false; continue; }
+      if (c === '\\') { escape = true; continue; }
+      if (c === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) return text.slice(i, j + 1);
+      }
+    }
+  }
+  return null;
 }
 
 export function safeParseJSON<T>(text: string, defaultValue: T): T {
+  if (!text) return defaultValue;
+  const trimmed = text.trim();
   try {
-    // Try clean parse first
-    return JSON.parse(text.trim());
-  } catch (e) {
-    try {
-      // Try to find the first '{' or '[' and last '}' or ']'
-      const firstBrace = text.indexOf('{');
-      const firstBracket = text.indexOf('[');
-      const start = (firstBrace !== -1 && firstBracket !== -1) 
-        ? Math.min(firstBrace, firstBracket) 
-        : (firstBrace !== -1 ? firstBrace : firstBracket);
-      
-      const lastBrace = text.lastIndexOf('}');
-      const lastBracket = text.lastIndexOf(']');
-      const end = Math.max(lastBrace, lastBracket);
-      
-      if (start !== -1 && end !== -1 && end > start) {
-        const jsonPart = text.substring(start, end + 1);
-        return JSON.parse(jsonPart);
+    return JSON.parse(trimmed);
+  } catch {
+    const candidate = extractBalancedJSON(trimmed);
+    if (candidate) {
+      try {
+        return JSON.parse(candidate);
+      } catch (innerError) {
+        console.error('Failed to parse JSON even after extraction:', innerError);
       }
-    } catch (innerError) {
-      console.error("Failed to parse JSON even with recovery:", innerError);
     }
     return defaultValue;
   }

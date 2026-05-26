@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Book, Plus, ShieldCheck, FileText, X } from 'lucide-react';
+import { Plus, ShieldCheck, FileText, X, Trash2 } from 'lucide-react';
 import { normsService, Norm, Block } from '../services/normsService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -28,21 +28,53 @@ export function NormsManager() {
   const handleSaveNorm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!normForm.title.trim()) return;
-    await normsService.addNorm(normForm);
-    toast.success('Norma técnica criada com sucesso!');
-    setNormForm({ title: '', description: '' });
-    setShowNormModal(false);
-    loadData();
+    try {
+      await normsService.addNorm(normForm);
+      toast.success('Norma técnica criada com sucesso!');
+      setNormForm({ title: '', description: '' });
+      setShowNormModal(false);
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao salvar norma. Tente novamente.');
+    }
   };
 
   const handleSaveBlock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!blockForm.text.trim()) return;
-    await normsService.addBlock(blockForm);
-    toast.success('Bloco padrão criado com sucesso!');
-    setBlockForm({ type: '', text: '' });
-    setShowBlockModal(false);
-    loadData();
+    try {
+      await normsService.addBlock(blockForm);
+      toast.success('Bloco padrão criado com sucesso!');
+      setBlockForm({ type: '', text: '' });
+      setShowBlockModal(false);
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao salvar bloco. Tente novamente.');
+    }
+  };
+
+  const handleDeleteNorm = async (id: string) => {
+    try {
+      await normsService.deleteNorm(id);
+      toast.success('Norma removida.');
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao remover norma.');
+    }
+  };
+
+  const handleDeleteBlock = async (id: string) => {
+    try {
+      await normsService.deleteBlock(id);
+      toast.success('Bloco removido.');
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao remover bloco.');
+    }
   };
 
   return (
@@ -63,11 +95,21 @@ export function NormsManager() {
         </div>
         <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
           {norms.map(n => (
-            <div key={n.id} className="bg-white p-4 rounded-xl border border-black/5 hover:border-[var(--color-brand-primary)] transition-all cursor-pointer group shadow-sm">
-              <h4 className="font-bold text-sm">{n.title}</h4>
-              <p className="text-xs opacity-50 mt-1">{n.description}</p>
+            <div key={n.id} className="bg-white p-4 rounded-xl border border-black/5 hover:border-[var(--color-brand-primary)] transition-all group shadow-sm flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <h4 className="font-bold text-sm">{n.title}</h4>
+                <p className="text-xs opacity-50 mt-1">{n.description}</p>
+              </div>
+              <button
+                onClick={() => handleDeleteNorm(n.id)}
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-red-50 rounded-lg"
+                title="Remover norma"
+              >
+                <Trash2 size={14} className="text-red-500" />
+              </button>
             </div>
           ))}
+          {norms.length === 0 && <p className="text-xs opacity-40 italic">Nenhuma norma cadastrada.</p>}
         </div>
       </div>
 
@@ -87,11 +129,21 @@ export function NormsManager() {
         </div>
         <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
           {blocks.map(b => (
-            <div key={b.id} className="bg-white p-4 rounded-xl border border-black/5 flex flex-col gap-2 shadow-sm">
-              <span className="text-[10px] font-bold uppercase tracking-tighter bg-black/5 px-2 py-1 rounded w-fit">{b.type}</span>
+            <div key={b.id} className="bg-white p-4 rounded-xl border border-black/5 shadow-sm group">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[10px] font-bold uppercase tracking-tighter bg-black/5 px-2 py-1 rounded w-fit">{b.type || 'GERAL'}</span>
+                <button
+                  onClick={() => handleDeleteBlock(b.id)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-red-50 rounded-lg"
+                  title="Remover bloco"
+                >
+                  <Trash2 size={14} className="text-red-500" />
+                </button>
+              </div>
               <p className="text-[11px] opacity-60 leading-relaxed italic line-clamp-3">"{b.text}"</p>
             </div>
           ))}
+          {blocks.length === 0 && <p className="text-xs opacity-40 italic">Nenhum bloco cadastrado.</p>}
         </div>
       </div>
 

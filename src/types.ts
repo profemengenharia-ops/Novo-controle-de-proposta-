@@ -19,6 +19,14 @@ export interface TechnicalScopeItem {
   description: string;
 }
 
+/** Linha da matriz de periodicidade de manutenção. */
+export interface MaintenanceTask {
+  id: string;
+  equipment: string;   // Equipamento / sistema
+  inspection: string;  // Tipo de inspeção / serviço
+  frequency: string;   // Mensal, Trimestral, Semestral, Anual, etc.
+}
+
 export interface TechnicalScope {
   generalConsiderations: string;
   references: string[];
@@ -28,6 +36,10 @@ export interface TechnicalScope {
   exclusions: string[];
   contractorObligations: string[];
   contracteeObligations: string[];
+  /** Unidades / locais de execução (contratos multi-site). */
+  locations?: string[];
+  /** Matriz de periodicidade de manutenção. */
+  maintenancePlan?: MaintenanceTask[];
 }
 
 export interface CDDetails {
@@ -43,6 +55,11 @@ export interface CIDetails {
   siteOffice: number;
 }
 
+/**
+ * Canonical BDI configuration (Bonificação e Despesas Indiretas).
+ * All BDI consumers — per-item formation, global proposal pricing,
+ * and budget projects — share this shape.
+ */
 export interface BDIConfig {
   centralAdmin: number; // AC
   financialExpenses: number; // DF
@@ -71,6 +88,18 @@ export interface CommercialItem {
   totalPrice: number;
   source?: 'manual' | 'catalog' | 'spreadsheet' | 'erp' | 'engineering';
   priceFormation?: PriceFormation;
+  /** 'once' = valor único; 'monthly' = recorrente (mensalidade). Default: 'once'. */
+  billingType?: 'once' | 'monthly';
+  /** Nº de meses do contrato quando billingType === 'monthly'. Default: 12. */
+  contractMonths?: number;
+}
+
+/** Serviço adicional cobrado sob demanda (tabela de preços / chamados). */
+export interface OnDemandService {
+  id: string;
+  description: string;
+  unit: string;   // ex: "por visita", "por hora"
+  price: number;
 }
 
 export interface CommercialProposal {
@@ -79,7 +108,9 @@ export interface CommercialProposal {
   reajuste: string;
   guarantee: string;
   items: CommercialItem[];
-  pricingMode: 'manual' | 'catalog' | 'spreadsheet' | 'erp';
+  pricingMode?: string;
+  /** Serviços sob demanda / chamados — não somam no valor total do contrato. */
+  onDemandServices?: OnDemandService[];
 }
 
 export interface ContractDetails {
@@ -109,6 +140,8 @@ export interface Proposal {
   scopeTitle?: string;
   lossReason?: string;
   pricing?: GlobalPriceFormation;
+  vendorId?: string;
+  vendorName?: string;
 }
 
 export interface PricingBudgetItem {
@@ -121,25 +154,19 @@ export interface PricingBudgetItem {
   totalCost: number;
 }
 
+export interface BudgetIndirectCostsBreakdown {
+  administration: number;
+  mobilization: number;
+  transport: number;
+  food: number;
+  lodging: number;
+  others: number;
+}
+
 export interface GlobalPriceFormation {
   items: PricingBudgetItem[];
-  indirectCosts: {
-    administration: number;
-    mobilization: number;
-    transport: number;
-    food: number;
-    lodging: number;
-    others: number;
-  };
-  bdi: {
-    indirectExpenses: number;
-    centralAdmin: number;
-    risks: number;
-    guarantees: number;
-    financial: number;
-    taxes: number;
-    profitMargin: number;
-  };
+  indirectCosts: BudgetIndirectCostsBreakdown;
+  bdi: BDIConfig;
 }
 
 export interface ProposalRevision {
@@ -206,23 +233,10 @@ export interface BudgetStage {
   items: BudgetLineItem[];
 }
 
-export interface BudgetIndirectCosts {
-  administration: number;
-  mobilization: number;
-  transport: number;
-  food: number;
-  lodging: number;
-  others: number;
-}
+export type BudgetIndirectCosts = BudgetIndirectCostsBreakdown;
 
-export interface BudgetBDI {
-  centralAdmin: number;      // AC
-  financialExpenses: number; // DF
-  insuranceAndGuarantees: number; // S+G
-  risks: number;             // R
-  profit: number;            // L
-  taxes: number;             // I (ISS + PIS/COFINS)
-  calculatedBDI: number;     // resultado em %
+export interface BudgetBDI extends BDIConfig {
+  calculatedBDI: number; // resultado em %
 }
 
 export interface BudgetProject {
@@ -244,6 +258,8 @@ export interface BudgetProject {
   updatedAt: string;
   createdBy: string;
   linkedProposalId?: string;
+  originOpportunityId?: string;
+  requestedBy?: string;
 }
 
 export interface LaborRate {
@@ -253,4 +269,72 @@ export interface LaborRate {
   costPerHour: number;
   laborCharges: number;  // % de encargos sociais (ex: 0.72)
   totalCostPerHour: number;
+}
+
+// ─── Mini-CRM ──────────────────────────────────────────────────────────────────
+
+export interface Vendor {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export type OpportunityStage = 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost';
+
+export type ActivityType = 'call' | 'email' | 'meeting' | 'note' | 'proposal_sent';
+
+export interface CRMActivity {
+  id: string;
+  opportunityId: string;
+  type: ActivityType;
+  description: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface CRMTask {
+  id: string;
+  opportunityId: string;
+  title: string;
+  dueDate?: string;
+  completed: boolean;
+  assignedTo?: string;
+  createdAt: string;
+}
+
+export interface CRMOpportunity {
+  id: string;
+  title: string;
+  clientName: string;
+  value: number;
+  stage: OpportunityStage;
+  vendorId?: string;
+  linkedProposalId?: string;
+  linkedBudgetId?: string;
+  probability: number;
+  expectedCloseDate?: string;
+  activities: CRMActivity[];
+  tasks: CRMTask[];
+  notes?: string;
+  lossReason?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+export interface CRMClient {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  segment?: string;
+  city?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 }

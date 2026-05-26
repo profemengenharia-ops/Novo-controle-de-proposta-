@@ -2,18 +2,21 @@ import React, { useState, useCallback, useMemo } from 'react';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, Save, Check,
   Package, HardHat, Wrench, Truck, Edit2, GripVertical,
-  AlertCircle, TrendingUp, Settings2, ChevronUp,
+  AlertCircle, TrendingUp, Settings2, ChevronUp, Copy, ArrowUp, ArrowDown,
+  Briefcase, FileText,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import {
   BudgetProject, BudgetStatus, BudgetStage, BudgetLineItem,
-  BudgetLineType, BudgetBDI, BudgetIndirectCosts,
+  BudgetLineType, BudgetBDI, BudgetIndirectCosts, ProposalStatus,
 } from '../types';
 import { budgetProjectService } from '../services/budgetProjectService';
+import { proposalService } from '../services/proposalService';
 import { formatCurrency, cn, calculateBDI } from '../lib/utils';
-import { AddBudgetItemModal } from './AddBudgetItemModal';
+import { BudgetLineItemModal } from './BudgetLineItemModal';
 import { BudgetPrintView } from './BudgetPrintView';
+import { confirmAction } from '../hooks/useConfirm';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -54,6 +57,14 @@ const TYPE_LABEL: Record<BudgetLineType, string> = {
   equipamento: 'Equipamento',
 };
 
+// ─── BDI Presets ─────────────────────────────────────────────────────────────
+
+const BDI_PRESETS: { label: string; bdi: Omit<BudgetBDI, 'calculatedBDI'> }[] = [
+  { label: 'Obra Pública', bdi: { centralAdmin: 4, financialExpenses: 1.2, insuranceAndGuarantees: 0.8, risks: 1, profit: 7.5, taxes: 8.65 } },
+  { label: 'Serviços Privados', bdi: { centralAdmin: 3, financialExpenses: 1.0, insuranceAndGuarantees: 0.5, risks: 0.5, profit: 10, taxes: 6.5 } },
+  { label: 'Conservador', bdi: { centralAdmin: 5, financialExpenses: 1.5, insuranceAndGuarantees: 1.0, risks: 2.0, profit: 12, taxes: 8.65 } },
+];
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function newId() { return crypto.randomUUID(); }
@@ -86,9 +97,10 @@ function computeBDI(bdi: BudgetBDI): number {
 interface Props {
   project: BudgetProject;
   onBack: () => void;
+  onNavigate?: (tab: string) => void;
 }
 
-export function BudgetEditor({ project: initial, onBack }: Props) {
+export function BudgetEditor({ project: initial, onBack, onNavigate }: Props) {
   const [project, setProject] = useState<BudgetProject>(initial);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -110,6 +122,11 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
   const calculatedBDIPct = useMemo(() => computeBDI(project.bdi), [project.bdi]);
   const totalBDI = useMemo(() => totalDirectCost * (calculatedBDIPct / 100), [totalDirectCost, calculatedBDIPct]);
   const finalPrice = useMemo(() => totalDirectCost + totalIndirectCost + totalBDI, [totalDirectCost, totalIndirectCost, totalBDI]);
+
+  const marginPct = useMemo(
+    () => (finalPrice > 0 ? (totalBDI / finalPrice) * 100 : 0),
+    [totalBDI, finalPrice]
+  );
 
   const byType = useMemo(() => {
     const totals: Record<BudgetLineType, number> = { material: 0, mao_de_obra: 0, servico: 0, equipamento: 0 };
@@ -153,9 +170,38 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
     setEditingStageId(null);
   };
 
-  const deleteStage = (id: string) => {
-    if (!confirm('Excluir esta etapa e todos os seus itens?')) return;
+  const deleteStage = async (id: string) => {
+    const ok = await confirmAction({
+      title: 'Excluir esta etapa?',
+      description: 'Todos os itens dessa etapa serão removidos.',
+      confirmLabel: 'Excluir',
+    });
+    if (!ok) return;
     update({ stages: project.stages.filter(s => s.id !== id) });
+  };
+
+  const duplicateStage = (stageId: string) => {
+    const src = project.stages.find(s => s.id === stageId);
+    if (!src) return;
+    const clone: BudgetStage = {
+      id: newId(),
+      name: src.name + ' (Cópia)',
+      order: project.stages.length + 1,
+      items: src.items.map(i => ({ ...i, id: newId() })),
+    };
+    setExpandedStages(prev => new Set([...prev, clone.id]));
+    update({ stages: [...project.stages, clone] });
+    toast.success('Etapa duplicada!');
+  };
+
+  const moveStage = (id: string, direction: 'up' | 'down') => {
+    const idx = project.stages.findIndex(s => s.id === id);
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === project.stages.length - 1) return;
+    const stages = [...project.stages];
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    [stages[idx], stages[swapIdx]] = [stages[swapIdx], stages[idx]];
+    update({ stages: stages.map((s, i) => ({ ...s, order: i + 1 })) });
   };
 
   const addItemToStage = (stageId: string, item: Omit<BudgetLineItem, 'id'>) => {
@@ -183,6 +229,11 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
           : s
       ),
     });
+  };
+
+  const duplicateItem = (stageId: string, item: BudgetLineItem) => {
+    const { id: _id, ...rest } = item;
+    addItemToStage(stageId, rest);
   };
 
   const deleteItem = (stageId: string, itemId: string) => {
@@ -224,6 +275,76 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
     }
   };
 
+  const [generatingProposal, setGeneratingProposal] = useState(false);
+
+  const handleGenerateProposal = async () => {
+    if (!onNavigate) return;
+    setGeneratingProposal(true);
+    try {
+      // Save first to ensure latest numbers
+      await budgetProjectService.update(project.id, {
+        ...project,
+        totalDirectCost,
+        totalIndirectCost,
+        totalBDI,
+        finalPrice,
+        bdi: { ...project.bdi, calculatedBDI: calculatedBDIPct },
+      });
+
+      // Fator de markup: distribui indiretos + BDI proporcionalmente sobre os
+      // itens, de modo que a soma das linhas seja igual ao finalPrice (sem expor
+      // o custo direto ao cliente nem divergir do total exibido).
+      const markup = totalDirectCost > 0 ? finalPrice / totalDirectCost : 1;
+      const newId = await proposalService.createProposal({
+        clientName: project.clientName,
+        proposalNumber: `PF-${new Date().getFullYear()}-${crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4)}`,
+        revision: '00',
+        status: ProposalStatus.DRAFT,
+        validityDays: 30,
+        deadline: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+        createdBy: project.createdBy,
+        technicalScope: {
+          generalConsiderations: project.notes ?? '',
+          references: [],
+          norms: [],
+          items: [],
+          safetyNotes: '',
+          exclusions: [],
+          contractorObligations: [],
+          contracteeObligations: [],
+        },
+        commercialProposal: {
+          totalValue: finalPrice,
+          paymentTerms: '',
+          reajuste: '',
+          guarantee: '',
+          items: project.stages.flatMap(st =>
+            st.items.map(i => ({
+              id: i.id,
+              description: i.description,
+              quantity: i.quantity,
+              unit: i.unit,
+              unitPrice: i.unitCost * markup,
+              totalPrice: i.totalCost * markup,
+              source: 'engineering' as const,
+            }))
+          ),
+        },
+        scopeTitle: project.title,
+      });
+
+      // Link the proposal back to the budget
+      await budgetProjectService.update(project.id, { linkedProposalId: newId });
+      setDirty(false);
+      toast.success('Proposta criada com sucesso!');
+      onNavigate(`edit-${newId}`);
+    } catch {
+      toast.error('Erro ao gerar proposta.');
+    } finally {
+      setGeneratingProposal(false);
+    }
+  };
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -236,6 +357,19 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
         >
           ← Voltar aos Orçamentos
         </button>
+
+        {/* Origin banner */}
+        {project.originOpportunityId && (
+          <div className="flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+            <Briefcase size={14} className="text-violet-600 shrink-0" />
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-violet-700">Solicitado pelo Comercial</p>
+              {project.requestedBy && (
+                <p className="text-xs text-violet-600 opacity-70">Responsável: {project.requestedBy}</p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white rounded-2xl border border-black/5 shadow-sm p-6">
           <div className="space-y-1">
@@ -260,6 +394,19 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
               calculatedBDIPct={calculatedBDIPct}
               byType={byType}
             />
+
+            {project.status === BudgetStatus.APPROVED && onNavigate && (
+              <button
+                onClick={handleGenerateProposal}
+                disabled={generatingProposal}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-green-600 text-white text-xs font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg shadow-green-200 disabled:opacity-50"
+              >
+                {generatingProposal
+                  ? <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white" />
+                  : <FileText size={14} />}
+                {generatingProposal ? 'Gerando...' : 'Gerar Proposta'}
+              </button>
+            )}
 
             <button
               onClick={handleSave}
@@ -316,6 +463,29 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
                 </span>
 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => moveStage(stage.id, 'up')}
+                    className="p-1.5 hover:bg-black/5 rounded-lg text-black/30 hover:text-black transition-colors disabled:opacity-20"
+                    title="Mover para cima"
+                    disabled={project.stages.indexOf(stage) === 0}
+                  >
+                    <ArrowUp size={13} />
+                  </button>
+                  <button
+                    onClick={() => moveStage(stage.id, 'down')}
+                    className="p-1.5 hover:bg-black/5 rounded-lg text-black/30 hover:text-black transition-colors disabled:opacity-20"
+                    title="Mover para baixo"
+                    disabled={project.stages.indexOf(stage) === project.stages.length - 1}
+                  >
+                    <ArrowDown size={13} />
+                  </button>
+                  <button
+                    onClick={() => duplicateStage(stage.id)}
+                    className="p-1.5 hover:bg-blue-50 rounded-lg text-blue-400 hover:text-blue-600 transition-colors"
+                    title="Duplicar etapa"
+                  >
+                    <Copy size={13} />
+                  </button>
                   <button
                     onClick={() => { setEditingStageId(stage.id); setEditingStageName(stage.name); }}
                     className="p-1.5 hover:bg-black/5 rounded-lg text-black/40 hover:text-black transition-colors"
@@ -375,6 +545,7 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
                                 onUpdate={patch => updateItem(stage.id, item.id, patch)}
                                 onDelete={() => deleteItem(stage.id, item.id)}
                                 onEdit={() => setAddItemModal({ stageId: stage.id, item })}
+                                onDuplicate={() => duplicateItem(stage.id, item)}
                               />
                             ))}
                           </tbody>
@@ -468,6 +639,57 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
               <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Preço Final</span>
               <span className="font-mono text-xl font-black text-white">{formatCurrency(finalPrice)}</span>
             </div>
+
+            {/* Margin health */}
+            {finalPrice > 0 && (
+              <div className={cn(
+                'rounded-2xl p-4 flex items-center justify-between',
+                marginPct >= 15 ? 'bg-green-50' : marginPct >= 8 ? 'bg-orange-50' : 'bg-red-50'
+              )}>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-50">Margem BDI</p>
+                  <p className={cn(
+                    'text-2xl font-black',
+                    marginPct >= 15 ? 'text-green-700' : marginPct >= 8 ? 'text-orange-600' : 'text-red-600'
+                  )}>
+                    {marginPct.toFixed(1)}%
+                  </p>
+                </div>
+                <span className={cn(
+                  'text-[10px] font-bold px-2 py-1 rounded-lg',
+                  marginPct >= 15 ? 'bg-green-100 text-green-700' : marginPct >= 8 ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-600'
+                )}>
+                  {marginPct >= 15 ? 'Saudável' : marginPct >= 8 ? 'Atenção' : 'Crítico'}
+                </span>
+              </div>
+            )}
+
+            {/* Breakdown % */}
+            {totalDirectCost > 0 && (
+              <div className="space-y-1.5">
+                {(Object.keys(byType) as BudgetLineType[]).map(type =>
+                  byType[type] > 0 ? (
+                    <div key={type} className="space-y-1">
+                      <div className="flex justify-between text-[10px] font-bold opacity-50">
+                        <span>{TYPE_LABEL[type]}</span>
+                        <span>{((byType[type] / totalDirectCost) * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="h-1 bg-black/5 rounded-full overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full', {
+                            'bg-blue-400': type === 'material',
+                            'bg-orange-400': type === 'mao_de_obra',
+                            'bg-purple-400': type === 'servico',
+                            'bg-green-400': type === 'equipamento',
+                          })}
+                          style={{ width: `${(byType[type] / totalDirectCost) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : null
+                )}
+              </div>
+            )}
           </div>
 
           {/* Custos Indiretos */}
@@ -531,6 +753,17 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
                   className="overflow-hidden border-t border-black/5"
                 >
                   <div className="p-5 space-y-3">
+                    <div className="flex flex-wrap gap-2 pb-1">
+                      {BDI_PRESETS.map(p => (
+                        <button
+                          key={p.label}
+                          onClick={() => update({ bdi: { ...project.bdi, ...p.bdi } })}
+                          className="px-3 py-1.5 bg-orange-50 text-orange-700 text-[10px] font-bold rounded-lg hover:bg-orange-100 transition-all"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                     {BDI_FIELDS.map(f => (
                       <BDIRow
                         key={f.key}
@@ -573,7 +806,7 @@ export function BudgetEditor({ project: initial, onBack }: Props) {
       {/* Add item modal */}
       <AnimatePresence>
         {addItemModal && (
-          <AddBudgetItemModal
+          <BudgetLineItemModal
             editingItem={addItemModal.item}
             onClose={() => setAddItemModal(null)}
             onAdd={item => {
@@ -597,9 +830,10 @@ interface ItemRowProps {
   onUpdate: (patch: Partial<BudgetLineItem>) => void;
   onDelete: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
 }
 
-function ItemRow({ item, onUpdate, onDelete, onEdit }: ItemRowProps) {
+function ItemRow({ item, onUpdate, onDelete, onEdit, onDuplicate }: ItemRowProps) {
   const [editQty, setEditQty] = useState(false);
   const [editCost, setEditCost] = useState(false);
 
@@ -662,8 +896,9 @@ function ItemRow({ item, onUpdate, onDelete, onEdit }: ItemRowProps) {
 
       <td className="px-3 py-3">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={onEdit} className="p-1 hover:bg-black/5 rounded text-black/30 hover:text-black transition-colors"><Edit2 size={11} /></button>
-          <button onClick={onDelete} className="p-1 hover:bg-red-50 rounded text-red-300 hover:text-red-600 transition-colors"><Trash2 size={11} /></button>
+          <button onClick={onDuplicate} className="p-1 hover:bg-blue-50 rounded text-blue-300 hover:text-blue-600 transition-colors" title="Duplicar"><Copy size={11} /></button>
+          <button onClick={onEdit} className="p-1 hover:bg-black/5 rounded text-black/30 hover:text-black transition-colors" title="Editar"><Edit2 size={11} /></button>
+          <button onClick={onDelete} className="p-1 hover:bg-red-50 rounded text-red-300 hover:text-red-600 transition-colors" title="Excluir"><Trash2 size={11} /></button>
         </div>
       </td>
     </tr>

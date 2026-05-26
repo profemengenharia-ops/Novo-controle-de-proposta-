@@ -5,40 +5,100 @@ import { aiService } from '../services/aiService';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'sonner';
 
-import { 
-  Check, 
-  ChevronRight, 
-  ChevronLeft, 
-  Sparkles, 
-  Trash2, 
-  Plus, 
-  Save, 
+import {
+  Check,
+  ChevronRight,
+  ChevronLeft,
+  Sparkles,
+  Trash2,
+  Plus,
+  Save,
   AlertCircle,
   FileSpreadsheet,
-  PackageSearch,
-  Zap,
   Calculator,
-  TrendingUp,
   Search,
-  Upload,
-  ArrowRight
+  MapPin,
+  CalendarClock,
+  ClipboardList,
+  Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { cn, formatCurrency, formatDate, itemContractValue } from '../lib/utils';
 import * as XLSX from 'xlsx';
-import { PriceFormationModal } from './PriceFormationModal';
-import { PricingFormulation } from './PricingFormulation';
-import { CommercialItem, PriceFormation, GlobalPriceFormation } from '../types';
+import { CommercialItem, OnDemandService } from '../types';
 
-import { ProposalPrintView } from './ProposalPrintView';
+import { ProposalPremiumView } from './ProposalPremiumView';
 import { BudgetSelector } from './BudgetSelector';
 import { budgetProjectService } from '../services/budgetProjectService';
 import { BudgetProject } from '../types';
+import { normsService, Norm, Block } from '../services/normsService';
+import { calculateBDI } from '../lib/utils';
+import { crmService } from '../services/crmService';
+import { Vendor, CRMClient, CRMOpportunity } from '../types';
 
 interface WizardProps {
   proposalId?: string;
   onComplete: () => void;
 }
+
+/** Atalhos de escopo para a IA de engenharia (Etapa 3). */
+const AI_SCOPE_PRESETS: { label: string; prompt: string }[] = [
+  {
+    label: 'Inspeção Mensal de Incêndio',
+    prompt:
+      'Gere o escopo técnico detalhado de inspeção e manutenção preventiva mensal de sistema de combate a incêndio, incluindo central de alarme, detectores, sirenes, bomba de incêndio (jockey e principal), hidrantes, sprinklers e extintores, com as periodicidades aplicáveis (mensal, trimestral, semestral e anual).',
+  },
+  {
+    label: 'Instalação de Sprinklers',
+    prompt:
+      'Gere o escopo técnico de fornecimento e instalação de sistema de chuveiros automáticos (sprinklers) conforme ABNT NBR 10897, incluindo tubulação, bombas, válvulas de governo e alarme, e testes de aceitação.',
+  },
+  {
+    label: 'Alarme e Detecção',
+    prompt:
+      'Gere o escopo técnico de fornecimento e instalação de sistema de detecção e alarme de incêndio conforme ABNT NBR 17240, incluindo central, detectores de fumaça, acionadores manuais, avisadores sonoros/visuais e comissionamento.',
+  },
+  {
+    label: 'Rede de Hidrantes',
+    prompt:
+      'Gere o escopo técnico de fornecimento e instalação de rede de hidrantes conforme normas aplicáveis, incluindo tubulação, abrigos, mangueiras, esguichos, registros e bomba de pressurização, com testes hidrostáticos.',
+  },
+];
+
+/** Frequências disponíveis na matriz de periodicidade de manutenção. */
+const FREQUENCIES = ['Diária', 'Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual', 'Sob demanda'];
+
+/** Templates de checklist de manutenção (carregam linhas na matriz de periodicidade). */
+const MAINTENANCE_TEMPLATES: { label: string; tasks: { equipment: string; inspection: string; frequency: string }[] }[] = [
+  {
+    label: 'Inspeção Mensal de Incêndio',
+    tasks: [
+      { equipment: 'Central de alarme', inspection: 'Teste funcional e limpeza', frequency: 'Mensal' },
+      { equipment: 'Detectores de fumaça', inspection: 'Teste de acionamento', frequency: 'Mensal' },
+      { equipment: 'Sirenes / avisadores', inspection: 'Teste sonoro e visual', frequency: 'Trimestral' },
+      { equipment: 'Bomba de incêndio (jockey/principal)', inspection: 'Teste de partida e pressão', frequency: 'Mensal' },
+      { equipment: 'Hidrantes e mangueiras', inspection: 'Inspeção visual e teste hidrostático', frequency: 'Anual' },
+      { equipment: 'Sprinklers', inspection: 'Inspeção visual de cobertura', frequency: 'Trimestral' },
+      { equipment: 'Extintores', inspection: 'Verificação de carga e validade', frequency: 'Mensal' },
+    ],
+  },
+  {
+    label: 'Detecção e Alarme',
+    tasks: [
+      { equipment: 'Central de alarme', inspection: 'Teste de baterias e medição de tensão', frequency: 'Mensal' },
+      { equipment: 'Detectores', inspection: 'Limpeza e teste de sensibilidade', frequency: 'Semestral' },
+      { equipment: 'Acionadores manuais', inspection: 'Teste funcional', frequency: 'Trimestral' },
+    ],
+  },
+  {
+    label: 'Hidrantes e Bombas',
+    tasks: [
+      { equipment: 'Bomba principal', inspection: 'Teste de curva e vazão', frequency: 'Anual' },
+      { equipment: 'Bomba jockey', inspection: 'Teste de pressurização', frequency: 'Mensal' },
+      { equipment: 'Hidrantes', inspection: 'Inspeção de abrigos e mangueiras', frequency: 'Semestral' },
+    ],
+  },
+];
 
 export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const { user } = useAuth();
@@ -48,8 +108,21 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [aiPrompt, setAiPrompt] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [revisionNote, setRevisionNote] = useState('');
-  const [selectedItemForPricing, setSelectedItemForPricing] = useState<{index: number, item: CommercialItem} | null>(null);
   const [showBudgetSelector, setShowBudgetSelector] = useState(false);
+  const [libraryNorms, setLibraryNorms] = useState<Norm[]>([]);
+  const [libraryBlocks, setLibraryBlocks] = useState<Block[]>([]);
+  const [newReference, setNewReference] = useState('');
+  const [newCustomNorm, setNewCustomNorm] = useState('');
+  const [validationErrors, setValidationErrors] = useState<{ clientName?: string; scopeTitle?: string }>({});
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [clients, setClients] = useState<CRMClient[]>([]);
+  const [opportunities, setOpportunities] = useState<CRMOpportunity[]>([]);
+  const [budgetProjects, setBudgetProjects] = useState<BudgetProject[]>([]);
+  const [normSearch, setNormSearch] = useState('');
+  const [newLocation, setNewLocation] = useState('');
+  const [isDirty, setIsDirty] = useState(false);
+  const [maxStepReached, setMaxStepReached] = useState(1);
+  const [objectiveLoading, setObjectiveLoading] = useState(false);
   
   const [proposal, setProposal] = useState<Partial<Proposal>>({
     clientName: '',
@@ -61,7 +134,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     followUpDate: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     contractDetails: {
       contractNumber: '',
-      signingDate: '',
+      signingDate: new Date().toISOString().split('T')[0],
       executionDeadline: ''
     },
     technicalScope: {
@@ -101,10 +174,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       }
       load();
 
-      // Realtime subscription for pricing updates
       const unsubscribe = proposalService.subscribeToProposal(proposalId, (updated) => {
         setProposal(prev => {
-          // Only update if the status changed to 'calculado' or if there's significant data change
           if (prev.status === ProposalStatus.DRAFT && updated.status !== ProposalStatus.DRAFT) {
             toast.info(`Status da proposta atualizado para: ${updated.status.toUpperCase()}`);
           }
@@ -120,45 +191,80 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     }
   }, [proposalId]);
 
+  useEffect(() => {
+    normsService.getNorms().then(setLibraryNorms).catch(console.error);
+    normsService.getBlocks().then(setLibraryBlocks).catch(console.error);
+    crmService.getVendors().then(vs => setVendors(vs.filter(v => v.active))).catch(console.error);
+    crmService.getClients().then(setClients).catch(console.error);
+    crmService.getOpportunities().then(setOpportunities).catch(console.error);
+    budgetProjectService.getAll().then(setBudgetProjects).catch(console.error);
+  }, []);
+
+  // Marca a maior etapa já alcançada (para permitir voltar/pular para etapas visitadas).
+  useEffect(() => { setMaxStepReached(m => Math.max(m, step)); }, [step]);
+
+  // Avisa ao fechar/atualizar a aba se houver alterações não salvas.
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
+
   const handleSave = async () => {
-    if (!proposal.clientName?.trim()) {
-      alert('Por favor, informe o nome do cliente.');
-      return;
-    }
-    if (!proposal.scopeTitle?.trim()) {
-      alert('Por favor, informe o título do escopo.');
+    const errors: { clientName?: string; scopeTitle?: string } = {};
+    if (!proposal.clientName?.trim()) errors.clientName = 'Informe o nome do cliente.';
+    if (!proposal.scopeTitle?.trim()) errors.scopeTitle = 'Informe o título do escopo.';
+    setValidationErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error('Há campos obrigatórios não preenchidos.');
+      setStep(1);
       return;
     }
 
     setLoading(true);
     try {
-      const finalTotal = calculateTotal(proposal.commercialProposal?.items || []);
+      const itemsTotal = calculateTotal(proposal.commercialProposal?.items || []);
+      const currentTotal = proposal.commercialProposal?.totalValue || 0;
+      // Preserva o totalValue se foi definido pela Formação de Preço (Step 5),
+      // detectado quando há um pricing aplicado e o total diverge da soma dos itens.
+      const userAppliedPricing =
+        !!proposal.pricing &&
+        proposal.pricing.items.length > 0 &&
+        currentTotal > 0 &&
+        Math.abs(currentTotal - itemsTotal) > 0.01;
+
+      const finalTotal = userAppliedPricing
+        ? currentTotal
+        : (itemsTotal > 0 ? itemsTotal : currentTotal);
+
       const proposalToSave = {
         ...proposal,
         commercialProposal: {
           ...proposal.commercialProposal!,
-          totalValue: finalTotal > 0 ? finalTotal : (proposal.commercialProposal?.totalValue || 0)
-        }
+          totalValue: finalTotal,
+        },
       };
 
       if (proposal.id) {
         let nextRev = proposal.revision || '00';
         if (revisionNote) {
           const revNum = parseInt(nextRev);
-          nextRev = String(revNum + 1).padStart(2, '0');
+          nextRev = String((Number.isFinite(revNum) ? revNum : 0) + 1).padStart(2, '0');
         }
 
-        await proposalService.updateProposal(proposal.id, { 
-          ...proposalToSave, 
-          revision: nextRev 
+        await proposalService.updateProposal(proposal.id, {
+          ...proposalToSave,
+          revision: nextRev,
         }, revisionNote);
       } else {
         await proposalService.createProposal({
           ...proposalToSave as Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'>,
-          createdBy: user?.id || ''
+          createdBy: user?.id || 'unknown'
         });
       }
       toast.success(proposal.id ? 'Proposta atualizada com sucesso!' : 'Proposta criada com sucesso!');
+      setIsDirty(false);
       onComplete();
     } catch (e) {
       console.error(e);
@@ -167,7 +273,92 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     setLoading(false);
   };
 
+  const addReference = () => {
+    const ref = newReference.trim();
+    if (!ref) return;
+    updateTechnical('references', [...(proposal.technicalScope?.references || []), ref]);
+    setNewReference('');
+  };
+
+  // ── Unidades / Locais de execução ────────────────────────────────────────────
+  const addLocation = () => {
+    const loc = newLocation.trim();
+    if (!loc) return;
+    updateTechnical('locations', [...(proposal.technicalScope?.locations || []), loc]);
+    setNewLocation('');
+  };
+
+  // ── Matriz de periodicidade de manutenção ────────────────────────────────────
+  const loadMaintenanceTemplate = (tasks: { equipment: string; inspection: string; frequency: string }[]) => {
+    const withIds = tasks.map(t => ({ id: crypto.randomUUID(), ...t }));
+    updateTechnical('maintenancePlan', [...(proposal.technicalScope?.maintenancePlan || []), ...withIds]);
+    toast.success(`${withIds.length} itens adicionados à matriz de periodicidade.`);
+  };
+  const addMaintenanceRow = () => {
+    updateTechnical('maintenancePlan', [
+      ...(proposal.technicalScope?.maintenancePlan || []),
+      { id: crypto.randomUUID(), equipment: '', inspection: '', frequency: 'Mensal' },
+    ]);
+  };
+  const updateMaintenanceRow = (id: string, patch: Partial<{ equipment: string; inspection: string; frequency: string }>) => {
+    updateTechnical('maintenancePlan', (proposal.technicalScope?.maintenancePlan || []).map(t => t.id === id ? { ...t, ...patch } : t));
+  };
+  const removeMaintenanceRow = (id: string) => {
+    updateTechnical('maintenancePlan', (proposal.technicalScope?.maintenancePlan || []).filter(t => t.id !== id));
+  };
+
+  const addCustomNorm = () => {
+    const norm = newCustomNorm.trim();
+    if (!norm) return;
+    if (proposal.technicalScope?.norms?.includes(norm)) {
+      toast.info('Norma já adicionada.');
+      return;
+    }
+    updateTechnical('norms', [...(proposal.technicalScope?.norms || []), norm]);
+    setNewCustomNorm('');
+  };
+
+  const insertBlock = (block: Block) => {
+    const lower = (block.type || '').toLowerCase();
+    let target: keyof Proposal['technicalScope'];
+    if (lower.includes('contratada')) target = 'contractorObligations';
+    else if (lower.includes('contratante')) target = 'contracteeObligations';
+    else if (lower.includes('exclus')) target = 'exclusions';
+    else target = 'contracteeObligations';
+
+    const current = (proposal.technicalScope?.[target] as string[] | undefined) || [];
+    if (current.includes(block.text)) {
+      toast.info('Este bloco já foi inserido.');
+      return;
+    }
+    updateTechnical(target, [...current, block.text]);
+    toast.success(`Bloco "${block.type}" inserido.`);
+  };
+
   const [pricingInsight, setPricingInsight] = useState<string | null>(null);
+
+  const handleAiGenerateObjective = async () => {
+    const seed = (proposal.scopeTitle || aiPrompt || '').trim();
+    if (!seed) {
+      toast.info('Informe o título do escopo (Etapa 1) ou descreva o projeto abaixo.');
+      return;
+    }
+    setObjectiveLoading(true);
+    try {
+      const text = await aiService.generateScopeSummary(
+        `Projeto/escopo: ${seed}. Cliente: ${proposal.clientName || 'não informado'}.`
+      );
+      if (text) {
+        updateTechnical('generalConsiderations', text);
+        setIsDirty(true);
+        toast.success('Objeto e Escopo gerado.');
+      } else {
+        toast.error('Não foi possível gerar o texto agora.');
+      }
+    } finally {
+      setObjectiveLoading(false);
+    }
+  };
 
   const handleAiGenerateText = async (prompt: string) => {
     if (!prompt.trim()) return;
@@ -226,48 +417,72 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   };
 
   const calculateTotal = (items: any[]) => {
-    return items.reduce((acc, item) => acc + (item.totalPrice || 0), 0);
+    return items.reduce((acc, item) => acc + itemContractValue(item), 0);
   };
 
   const addCommercialItem = () => {
-    const newItem = { id: crypto.randomUUID(), description: '', quantity: 1, unit: 'UN', unitPrice: 0, totalPrice: 0, source: 'manual' };
+    const newItem = { id: crypto.randomUUID(), description: '', quantity: 1, unit: 'UN', unitPrice: 0, totalPrice: 0, source: 'manual', billingType: 'once' as const };
     updateCommercial('items', [...(proposal.commercialProposal?.items || []), newItem]);
     setTimeout(() => document.getElementById(`pw-item-${newItem.id}`)?.focus(), 50);
   };
 
+  // ── Serviços sob demanda / chamados ──────────────────────────────────────────
+  const onDemandServices = proposal.commercialProposal?.onDemandServices || [];
+  const addOnDemandService = () => {
+    const next: OnDemandService = { id: crypto.randomUUID(), description: '', unit: 'por visita', price: 0 };
+    updateCommercial('onDemandServices', [...onDemandServices, next]);
+  };
+  const updateOnDemandService = (id: string, patch: Partial<OnDemandService>) => {
+    updateCommercial('onDemandServices', onDemandServices.map(s => s.id === id ? { ...s, ...patch } : s));
+  };
+  const removeOnDemandService = (id: string) => {
+    updateCommercial('onDemandServices', onDemandServices.filter(s => s.id !== id));
+  };
+
   const handleBudgetSelect = (project: BudgetProject) => {
-    // Import items from all stages
-    const importedItems: CommercialItem[] = project.stages.flatMap(stage => 
-      stage.items.map(item => ({
-        id: crypto.randomUUID(),
-        description: `[${stage.name}] ${item.description}`,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitPrice: item.unitCost * (1 + (project.bdi.calculatedBDI / 100)), // Apply BDI
-        totalPrice: 0, // Will be calculated below
-        source: 'engineering'
-      }))
+    // Recompute BDI on import (canonical formula). Never trust persisted calculatedBDI.
+    const bdiRate = calculateBDI({
+      ac: project.bdi.centralAdmin,
+      sg: project.bdi.insuranceAndGuarantees,
+      r: project.bdi.risks,
+      df: project.bdi.financialExpenses,
+      l: project.bdi.profit,
+      i: project.bdi.taxes,
+    });
+
+    if (bdiRate <= 0) {
+      toast.warning('Atenção: BDI calculado é zero ou negativo. Verifique a configuração do orçamento.');
+    }
+
+    const importedItems: CommercialItem[] = project.stages.flatMap(stage =>
+      stage.items.map(item => {
+        const unitPrice = item.unitCost * (1 + bdiRate);
+        return {
+          id: crypto.randomUUID(),
+          description: `[${stage.name}] ${item.description}`,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPrice,
+          totalPrice: item.quantity * unitPrice,
+          source: 'engineering' as const,
+        };
+      })
     );
 
-    // Calculate total price for each imported item
-    const finalizedItems = importedItems.map(item => ({
-      ...item,
-      totalPrice: item.quantity * item.unitPrice
-    }));
-
-    updateCommercial('items', [...(proposal.commercialProposal?.items || []), ...finalizedItems]);
+    updateCommercial('items', [...(proposal.commercialProposal?.items || []), ...importedItems]);
     setShowBudgetSelector(false);
-    toast.success(`${finalizedItems.length} itens importados de "${project.title}"`);
+    toast.success(
+      `${importedItems.length} itens importados de "${project.title}" (BDI ${(bdiRate * 100).toFixed(2)}%)`
+    );
   };
 
   const steps = [
     { title: 'Geral', icon: 1 },
     { title: 'Referências', icon: 2 },
     { title: 'Técnico', icon: 3 },
-    { title: 'Comercial', icon: 4 },
-    { title: 'Preço', icon: 5 },
-    { title: 'Workbench', icon: 6 },
+    { title: 'Comercial & Preço', icon: 4 },
   ];
+  const TOTAL_STEPS = steps.length;
 
   const updateTechnical = (key: keyof Proposal['technicalScope'], value: any) => {
     setProposal(prev => ({
@@ -305,7 +520,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       };
 
       if (key === 'items') {
-        nextCommercial.totalValue = (value as any[]).reduce((acc, item) => acc + (item.totalPrice || 0), 0);
+        nextCommercial.totalValue = (value as any[]).reduce((acc, item) => acc + itemContractValue(item), 0);
       }
 
       return {
@@ -314,6 +529,59 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
       };
     });
   };
+
+  // Cliente correspondente no CRM (para exibir cidade/segmento como contexto).
+  const matchedClient = clients.find(
+    c => c.name.trim().toLowerCase() === (proposal.clientName || '').trim().toLowerCase()
+  );
+
+  // Obras / oportunidades cadastradas no CRM para o cliente selecionado.
+  const clientKey = (proposal.clientName || '').trim().toLowerCase();
+  const clientOpportunities = clientKey
+    ? opportunities.filter(o => (o.clientName || '').trim().toLowerCase() === clientKey)
+    : [];
+
+  // Ao escolher uma obra, herda título do escopo e vendedor responsável.
+  const selectObra = (opp: CRMOpportunity) => {
+    const vendor = opp.vendorId ? vendors.find(v => v.id === opp.vendorId) : undefined;
+    setProposal(prev => ({
+      ...prev,
+      scopeTitle: opp.title,
+      vendorId: vendor?.id ?? prev.vendorId,
+      vendorName: vendor?.name ?? prev.vendorName,
+    }));
+    if (validationErrors.scopeTitle) setValidationErrors(prev => ({ ...prev, scopeTitle: undefined }));
+    if (!isDirty) setIsDirty(true);
+    toast.success(`Obra vinculada: ${opp.title}`);
+  };
+
+  const OPP_STAGE_LABELS: Record<string, string> = {
+    prospecting: 'Prospecção',
+    qualification: 'Qualificação',
+    proposal: 'Proposta',
+    negotiation: 'Negociação',
+    won: 'Ganha',
+    lost: 'Perdida',
+  };
+
+  // Obra atualmente vinculada (pelo título do escopo) e seus orçamentos.
+  const selectedObra = clientOpportunities.find(
+    o => o.title.trim().toLowerCase() === (proposal.scopeTitle || '').trim().toLowerCase()
+  );
+  const linkedBudgets = selectedObra
+    ? budgetProjects.filter(b => b.originOpportunityId === selectedObra.id)
+    : [];
+  const clientBudgets = clientKey
+    ? budgetProjects.filter(b => (b.clientName || '').trim().toLowerCase() === clientKey)
+    : [];
+  // Prefere orçamentos vinculados à obra; senão, mostra os do cliente.
+  const obraBudgets = linkedBudgets.length > 0 ? linkedBudgets : clientBudgets;
+
+  // Data-limite de validade = base (emissão/hoje) + dias de validade.
+  const validityBase = proposal.createdAt ? new Date(proposal.createdAt) : new Date();
+  const validityLimitISO = Number.isFinite(proposal.validityDays) && (proposal.validityDays || 0) > 0
+    ? new Date(validityBase.getTime() + (proposal.validityDays || 0) * 86400000).toISOString()
+    : '';
 
   return (
     <React.Fragment>
@@ -330,12 +598,12 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8" onChange={() => { if (!isDirty) setIsDirty(true); }}>
         {/* Main Content Area */}
         <div className="lg:col-span-3 space-y-8">
           {showPreview ? (
             <div className="animate-in fade-in zoom-in-95 duration-500">
-               <ProposalPrintView proposal={proposal as Proposal} />
+               <ProposalPremiumView proposal={proposal as Proposal} />
             </div>
           ) : (
             <React.Fragment>
@@ -343,7 +611,16 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
               <div className="flex items-center justify-between px-12">
                 {steps.map((s, i) => (
                   <React.Fragment key={i}>
-                    <div className="flex flex-col items-center space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => { if (i + 1 <= maxStepReached) setStep(i + 1); }}
+                      disabled={i + 1 > maxStepReached}
+                      aria-label={`Ir para a etapa ${s.title}`}
+                      className={cn(
+                        "flex flex-col items-center space-y-2 transition-opacity",
+                        i + 1 <= maxStepReached ? "cursor-pointer hover:opacity-80" : "cursor-default"
+                      )}
+                    >
                       <div className={cn(
                         "w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all",
                         step >= i + 1 ? "bg-[var(--color-brand-primary)] text-white" : "bg-black/5 text-black/40"
@@ -353,7 +630,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                       <span className={cn("text-[10px] font-bold uppercase tracking-widest", step >= i + 1 ? "opacity-100" : "opacity-30")}>
                         {s.title}
                       </span>
-                    </div>
+                    </button>
                     {i < steps.length - 1 && <div className="flex-1 h-[2px] bg-black/5 mx-4" />}
                   </React.Fragment>
                 ))}
@@ -373,23 +650,55 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                       <div className="grid grid-cols-2 gap-6">
                         <div className="space-y-2 col-span-2">
                           <label className="text-xs font-bold uppercase tracking-widest opacity-40">Escopo da Proposta (Título)</label>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             value={proposal.scopeTitle || ''}
-                            onChange={e => setProposal({...proposal, scopeTitle: e.target.value})}
+                            onChange={e => {
+                              setProposal({ ...proposal, scopeTitle: e.target.value });
+                              if (validationErrors.scopeTitle && e.target.value.trim()) setValidationErrors(prev => ({ ...prev, scopeTitle: undefined }));
+                            }}
                             placeholder="Ex: Instalação de Sistema de Incêndio - Prédio Comercial"
-                            className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-bold text-lg"
+                            className={cn(
+                              "w-full p-4 rounded-xl border-transparent focus:ring-0 transition-all font-bold text-lg",
+                              validationErrors.scopeTitle
+                                ? "bg-red-50 border border-red-200 focus:border-red-400"
+                                : "bg-black/5 focus:border-[var(--color-brand-primary)]"
+                            )}
                           />
+                          {validationErrors.scopeTitle && <p className="text-xs text-red-600 font-medium">{validationErrors.scopeTitle}</p>}
                         </div>
                         <div className="space-y-2">
                           <label className="text-xs font-bold uppercase tracking-widest opacity-40">Cliente / Empresa</label>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
+                            list="pw-crm-clients"
                             value={proposal.clientName}
-                            onChange={e => setProposal({...proposal, clientName: e.target.value})}
-                            placeholder="Ex: FRACAZA ADMINISTRACAO..."
-                            className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-medium"
+                            onChange={e => {
+                              setProposal({ ...proposal, clientName: e.target.value });
+                              if (validationErrors.clientName && e.target.value.trim()) setValidationErrors(prev => ({ ...prev, clientName: undefined }));
+                            }}
+                            placeholder="Digite ou selecione um cliente do CRM..."
+                            className={cn(
+                              "w-full p-4 rounded-xl border-transparent focus:ring-0 transition-all font-medium",
+                              validationErrors.clientName
+                                ? "bg-red-50 border border-red-200 focus:border-red-400"
+                                : "bg-black/5 focus:border-[var(--color-brand-primary)]"
+                            )}
                           />
+                          <datalist id="pw-crm-clients">
+                            {clients.map(c => (
+                              <option key={c.id} value={c.name}>
+                                {[c.company, c.city, c.segment].filter(Boolean).join(' · ')}
+                              </option>
+                            ))}
+                          </datalist>
+                          {matchedClient && (
+                            <p className="text-[10px] font-medium text-[var(--color-brand-primary)] flex items-center gap-1">
+                              <MapPin size={11} />
+                              {[matchedClient.company, matchedClient.city, matchedClient.segment].filter(Boolean).join(' · ') || 'Cliente vinculado ao CRM'}
+                            </p>
+                          )}
+                          {validationErrors.clientName && <p className="text-xs text-red-600 font-medium">{validationErrors.clientName}</p>}
                         </div>
                         <div className="space-y-2">
                            <label className="text-xs font-bold uppercase tracking-widest opacity-40">Número da Proposta</label>
@@ -411,12 +720,130 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                         </div>
                         <div className="space-y-2">
                            <label className="text-xs font-bold uppercase tracking-widest opacity-40">Validade (Dias)</label>
-                           <input 
-                            type="number" 
-                            value={proposal.validityDays}
-                            onChange={e => setProposal({...proposal, validityDays: parseInt(e.target.value)})}
+                           <input
+                            type="number"
+                            min={1}
+                            value={proposal.validityDays ?? ''}
+                            onChange={e => {
+                              const v = parseInt(e.target.value);
+                              setProposal({ ...proposal, validityDays: Number.isFinite(v) && v > 0 ? v : 0 });
+                            }}
                             className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)]"
                           />
+                          {validityLimitISO && (
+                            <p className="text-[10px] font-medium opacity-50 flex items-center gap-1">
+                              <CalendarClock size={11} />
+                              Válida até {formatDate(validityLimitISO)}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Obras / Oportunidades cadastradas do cliente */}
+                        {clientKey && (
+                          <div className="space-y-3 col-span-2">
+                            <label className="text-xs font-bold uppercase tracking-widest opacity-40 flex items-center gap-2">
+                              <Building2 size={13} className="text-[var(--color-brand-primary)]" />
+                              Obras cadastradas deste cliente
+                            </label>
+                            {clientOpportunities.length > 0 ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {clientOpportunities.map(opp => {
+                                  const isSelected = (proposal.scopeTitle || '').trim().toLowerCase() === opp.title.trim().toLowerCase();
+                                  return (
+                                    <button
+                                      key={opp.id}
+                                      type="button"
+                                      onClick={() => selectObra(opp)}
+                                      aria-label={`Vincular obra ${opp.title}`}
+                                      className={cn(
+                                        "text-left p-4 rounded-xl border transition-all group",
+                                        isSelected
+                                          ? "bg-[var(--color-brand-primary)]/5 border-[var(--color-brand-primary)]/40 shadow-sm"
+                                          : "bg-black/[0.02] border-black/5 hover:border-[var(--color-brand-primary)]/30 hover:bg-black/[0.04]"
+                                      )}
+                                    >
+                                      <div className="flex items-start justify-between gap-2">
+                                        <p className="font-bold text-sm leading-tight">{opp.title}</p>
+                                        {isSelected && <Check size={16} className="text-[var(--color-brand-primary)] shrink-0" />}
+                                      </div>
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <span className="text-xs font-mono opacity-60">{formatCurrency(opp.value || 0)}</span>
+                                        <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-black/5 opacity-50">
+                                          {OPP_STAGE_LABELS[opp.stage] || opp.stage}
+                                        </span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] opacity-40 italic px-1">
+                                {matchedClient
+                                  ? 'Nenhuma obra cadastrada para este cliente no CRM. Cadastre a obra em Comercial → Oportunidades.'
+                                  : 'Selecione um cliente do CRM para listar as obras vinculadas.'}
+                              </p>
+                            )}
+
+                            {/* Orçamentos da obra selecionada — importação rápida */}
+                            {selectedObra && obraBudgets.length > 0 && (
+                              <div className="rounded-xl border border-[var(--color-brand-primary)]/15 bg-[var(--color-brand-primary)]/[0.03] p-4 space-y-3 mt-1">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-brand-primary)] flex items-center gap-2">
+                                    <Calculator size={13} />
+                                    {linkedBudgets.length > 0 ? 'Orçamentos vinculados a esta obra' : 'Orçamentos deste cliente'}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowBudgetSelector(true)}
+                                    className="text-[10px] font-bold uppercase tracking-widest opacity-40 hover:opacity-100 transition-opacity"
+                                  >
+                                    Ver todos
+                                  </button>
+                                </div>
+                                <div className="space-y-2">
+                                  {obraBudgets.map(b => (
+                                    <div key={b.id} className="flex items-center gap-3 bg-white border border-black/5 rounded-lg p-3">
+                                      <div className="bg-black/5 p-2 rounded-lg text-[var(--color-brand-primary)]">
+                                        <FileSpreadsheet size={16} />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold truncate">{b.title}</p>
+                                        <p className="text-[10px] font-mono opacity-50">{formatCurrency(b.finalPrice || 0)}</p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleBudgetSelect(b)}
+                                        aria-label={`Importar itens do orçamento ${b.title}`}
+                                        className="px-3 py-2 rounded-lg bg-[var(--color-brand-primary)] text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 hover:opacity-90 transition-all shrink-0"
+                                      >
+                                        <Plus size={13} /> Importar itens
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="text-[10px] opacity-40">
+                                  Importa os itens do orçamento (com BDI) para a etapa comercial da proposta.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="space-y-2 col-span-2">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Vendedor Responsável</label>
+                          <select
+                            value={proposal.vendorId ?? ''}
+                            onChange={e => {
+                              const v = vendors.find(v => v.id === e.target.value);
+                              setProposal({ ...proposal, vendorId: v?.id ?? '', vendorName: v?.name ?? '' });
+                            }}
+                            className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:border-[var(--color-brand-primary)] focus:ring-0 transition-all font-medium appearance-none"
+                          >
+                            <option value="">— Sem responsável —</option>
+                            {vendors.map(v => (
+                              <option key={v.id} value={v.id}>{v.name}{v.role ? ` · ${v.role}` : ''}</option>
+                            ))}
+                          </select>
                         </div>
 
                         {/* Detalhes do Contrato */}
@@ -477,7 +904,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                   )}
 
                   {step === 2 && (
-                    <motion.div 
+                    <motion.div
                        key="step-2"
                        initial={{ opacity: 0, x: 20 }}
                        animate={{ opacity: 1, x: 0 }}
@@ -485,26 +912,67 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                        className="space-y-8 flex-1"
                     >
                       <div className="space-y-4">
-                         <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold uppercase tracking-widest opacity-40">Referências de Projeto</label>
-                            <button 
-                              onClick={() => {
-                                const name = prompt('Nome da referência:');
-                                if (name) updateTechnical('references', [...(proposal.technicalScope?.references || []), name]);
-                              }}
-                              className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center"
-                            >
-                              <Plus size={14} className="mr-1" /> Adicionar
-                            </button>
+                         <label className="text-xs font-bold uppercase tracking-widest opacity-40">Unidades / Locais de Execução</label>
+                         <p className="text-[10px] opacity-50 italic -mt-2">Para contratos multi-site, liste os endereços ou unidades atendidas.</p>
+                         <div className="flex gap-2">
+                           <input
+                             type="text"
+                             value={newLocation}
+                             onChange={e => setNewLocation(e.target.value)}
+                             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLocation(); } }}
+                             placeholder="Ex: CAAV 5 — Av. Paulista, 1000, São Paulo/SP"
+                             className="flex-1 p-3 bg-black/5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                           />
+                           <button
+                             onClick={addLocation}
+                             disabled={!newLocation.trim()}
+                             className="px-4 py-2 bg-[var(--color-brand-primary)] text-white rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40"
+                           >
+                             <Plus size={14} /> Adicionar
+                           </button>
+                         </div>
+                         <div className="space-y-2">
+                           {(proposal.technicalScope?.locations || []).map((loc, i) => (
+                             <div key={i} className="flex items-center justify-between bg-black/5 px-3 py-2 rounded-lg text-sm font-medium">
+                               <span className="flex items-center gap-2"><MapPin size={14} className="text-[var(--color-brand-primary)] shrink-0" /> {loc}</span>
+                               <button aria-label="Remover unidade" onClick={() => updateTechnical('locations', (proposal.technicalScope?.locations || []).filter((_, idx) => idx !== i))}>
+                                 <Trash2 size={14} className="text-red-500" />
+                               </button>
+                             </div>
+                           ))}
+                           {(!proposal.technicalScope?.locations || proposal.technicalScope.locations.length === 0) && (
+                             <p className="text-xs opacity-40 italic">Nenhuma unidade adicionada.</p>
+                           )}
+                         </div>
+                      </div>
+
+                      <div className="space-y-4">
+                         <label className="text-xs font-bold uppercase tracking-widest opacity-40">Referências de Projeto</label>
+                         <div className="flex gap-2">
+                           <input
+                             type="text"
+                             value={newReference}
+                             onChange={e => setNewReference(e.target.value)}
+                             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addReference(); } }}
+                             placeholder="Ex: Projeto Hidráulico Rev 03 ou URL..."
+                             className="flex-1 p-3 bg-black/5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                           />
+                           <button
+                             onClick={addReference}
+                             disabled={!newReference.trim()}
+                             className="px-4 py-2 bg-[var(--color-brand-primary)] text-white rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40"
+                           >
+                             <Plus size={14} /> Adicionar
+                           </button>
                          </div>
                           <div className="flex flex-wrap gap-2">
                             {proposal.technicalScope?.references?.map((ref, i) => (
                               <div key={i} className="bg-black/5 px-3 py-2 rounded-lg flex items-center gap-2 text-sm font-medium">
                                 {ref?.toLowerCase().startsWith('http') ? (
-                                  <a 
-                                    href={ref} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
+                                  <a
+                                    href={ref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
                                     className="text-[var(--color-brand-primary)] hover:underline truncate max-w-[200px]"
                                   >
                                     {ref}
@@ -512,7 +980,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                 ) : (
                                   ref
                                 )}
-                                <button onClick={() => updateTechnical('references', (proposal.technicalScope?.references || []).filter((_, idx) => idx !== i))}>
+                                <button aria-label="Remover referência" onClick={() => updateTechnical('references', (proposal.technicalScope?.references || []).filter((_, idx) => idx !== i))}>
                                   <Trash2 size={12} className="text-red-500" />
                                 </button>
                               </div>
@@ -522,59 +990,107 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                       </div>
 
                       <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Normas Técnicas Aplicáveis</label>
-                          <button 
-                            onClick={() => {
-                              const name = prompt('Nome da norma técnica:');
-                              if (name) updateTechnical('norms', [...(proposal.technicalScope?.norms || []), name]);
-                            }}
-                            className="text-xs font-bold text-[var(--color-brand-primary)] flex items-center"
+                        <label className="text-xs font-bold uppercase tracking-widest opacity-40">Normas Técnicas Aplicáveis</label>
+                        {libraryNorms.length === 0 ? (
+                          <p className="text-xs opacity-40 italic">Nenhuma norma cadastrada na biblioteca. Cadastre em "Normas & Blocos".</p>
+                        ) : (
+                          <>
+                          <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30" />
+                            <input
+                              type="text"
+                              value={normSearch}
+                              onChange={e => setNormSearch(e.target.value)}
+                              placeholder="Buscar norma (ex: 17240, alarme, hidrante)..."
+                              className="w-full pl-9 p-3 bg-black/5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                            />
+                          </div>
+                          {(() => {
+                            const q = normSearch.trim().toLowerCase();
+                            const filtered = q
+                              ? libraryNorms.filter(n => n.title.toLowerCase().includes(q) || (n.description || '').toLowerCase().includes(q))
+                              : libraryNorms;
+                            if (filtered.length === 0) {
+                              return <p className="text-xs opacity-40 italic">Nenhuma norma encontrada para "{normSearch}".</p>;
+                            }
+                            return (
+                          <div className="grid grid-cols-2 gap-3">
+                            {filtered.map((libNorm) => {
+                              const label = libNorm.title;
+                              const checked = proposal.technicalScope?.norms?.includes(label) || false;
+                              return (
+                                <label key={libNorm.id} className={cn(
+                                  "flex flex-col gap-1 p-4 rounded-xl border transition-all cursor-pointer",
+                                  checked ? "bg-[var(--color-brand-primary)]/5 border-[var(--color-brand-primary)]" : "border-black/5 hover:border-black/10"
+                                )}>
+                                  <input
+                                    type="checkbox"
+                                    className="hidden"
+                                    checked={checked}
+                                    onChange={() => {
+                                      const current = proposal.technicalScope?.norms || [];
+                                      const next = current.includes(label) ? current.filter(n => n !== label) : [...current, label];
+                                      updateTechnical('norms', next);
+                                    }}
+                                  />
+                                  <span className="text-sm font-medium">{label}</span>
+                                  {libNorm.description && <span className="text-[10px] opacity-50">{libNorm.description}</span>}
+                                </label>
+                              );
+                            })}
+                          </div>
+                            );
+                          })()}
+                          </>
+                        )}
+
+                        <div className="flex gap-2 pt-2">
+                          <input
+                            type="text"
+                            value={newCustomNorm}
+                            onChange={e => setNewCustomNorm(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomNorm(); } }}
+                            placeholder="Norma personalizada (ex: ABNT NBR 17240)..."
+                            className="flex-1 p-3 bg-black/5 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                          />
+                          <button
+                            onClick={addCustomNorm}
+                            disabled={!newCustomNorm.trim()}
+                            className="px-4 py-2 border border-[var(--color-brand-primary)] text-[var(--color-brand-primary)] rounded-xl text-xs font-bold flex items-center gap-1 disabled:opacity-40"
                           >
-                            <Plus size={14} className="mr-1" /> Adicionar Personalizada
+                            <Plus size={14} /> Personalizada
                           </button>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {[
-                            "Decreto Estadual Corpo de Bombeiros SP 56.819/2011",
-                            "NR 10 - Instalações e Serviços em Eletricidade",
-                            "NR 33 - Espaços Confinados",
-                            "NR 35 - Trabalhos em Altura"
-                          ].map((norm) => (
-                            <label key={norm} className={cn(
-                              "flex items-center p-4 rounded-xl border transition-all cursor-pointer",
-                              proposal.technicalScope?.norms?.includes(norm) ? "bg-[var(--color-brand-primary)]/5 border-[var(--color-brand-primary)]" : "border-black/5 hover:border-black/10"
-                            )}>
-                              <input 
-                                type="checkbox" 
-                                className="hidden"
-                                checked={proposal.technicalScope?.norms?.includes(norm) || false}
-                                onChange={() => {
-                                  const current = proposal.technicalScope?.norms || [];
-                                  const next = current.includes(norm) ? current.filter(n => n !== norm) : [...current, norm];
-                                  updateTechnical('norms', next);
-                                }}
-                              />
-                              <span className="text-sm font-medium">{norm}</span>
-                            </label>
-                          ))}
-                          
-                          {/* Custom norms */}
-                          {proposal.technicalScope?.norms?.filter(n => ![
-                            "Decreto Estadual Corpo de Bombeiros SP 56.819/2011",
-                            "NR 10 - Instalações e Serviços em Eletricidade",
-                            "NR 33 - Espaços Confinados",
-                            "NR 35 - Trabalhos em Altura"
-                          ].includes(n)).map((norm) => (
-                            <div key={norm} className="flex items-center p-4 rounded-xl border border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/5 justify-between">
-                              <span className="text-sm font-medium">{norm}</span>
-                              <button onClick={() => updateTechnical('norms', (proposal.technicalScope?.norms || []).filter(n => n !== norm))}>
-                                <Trash2 size={12} className="text-red-500" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+
+                        {/* Selected custom norms (those not in library) */}
+                        {proposal.technicalScope?.norms?.filter(n => !libraryNorms.some(ln => ln.title === n)).map((norm) => (
+                          <div key={norm} className="flex items-center p-3 rounded-xl border border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/5 justify-between">
+                            <span className="text-sm font-medium">{norm}</span>
+                            <button onClick={() => updateTechnical('norms', (proposal.technicalScope?.norms || []).filter(n => n !== norm))}>
+                              <Trash2 size={12} className="text-red-500" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
+
+                      {libraryBlocks.length > 0 && (
+                        <div className="space-y-3 pt-4 border-t border-black/5">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Inserir Blocos Padrão</label>
+                          <p className="text-[10px] opacity-50 italic">Insere o texto do bloco em Obrigações ou Exclusões conforme o tipo cadastrado.</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {libraryBlocks.map(b => (
+                              <button
+                                key={b.id}
+                                onClick={() => insertBlock(b)}
+                                className="text-left bg-white border border-black/5 hover:border-[var(--color-brand-primary)] p-3 rounded-xl transition-all"
+                              >
+                                <div className="text-[10px] font-bold uppercase tracking-tighter bg-black/5 px-2 py-1 rounded w-fit mb-2">{b.type || 'GERAL'}</div>
+                                <p className="text-[11px] opacity-60 italic line-clamp-2">"{b.text}"</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -586,12 +1102,36 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                        exit={{ opacity: 0, x: -20 }}
                        className="space-y-8 flex-1"
                     >
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Objeto e Escopo (texto de abertura)</label>
+                          <button
+                            type="button"
+                            onClick={handleAiGenerateObjective}
+                            disabled={objectiveLoading}
+                            className="flex items-center gap-1.5 text-xs font-bold text-[var(--color-brand-primary)] disabled:opacity-40"
+                          >
+                            <Sparkles size={12} /> {objectiveLoading ? 'Gerando...' : 'Gerar com IA'}
+                          </button>
+                        </div>
+                        <textarea
+                          value={proposal.technicalScope?.generalConsiderations || ''}
+                          onChange={e => updateTechnical('generalConsiderations', e.target.value)}
+                          rows={4}
+                          placeholder="Ex: Fornecimento de material e mão de obra para instalação do sistema de proteção e combate a incêndio, contemplando detecção, alarme e os subsistemas previstos em projeto..."
+                          className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:ring-1 focus:ring-[var(--color-brand-primary)] text-sm leading-relaxed"
+                        />
+                        <p className="text-[10px] opacity-50 italic">
+                          Parágrafo de abertura "Objeto e Escopo" da proposta. Se ficar vazio, um texto padrão é usado no PDF/Word.
+                        </p>
+                      </div>
+
                       <div className="bg-[var(--color-brand-dark)] text-white p-6 rounded-2xl space-y-4">
                         <div className="flex items-center gap-2">
                           <Sparkles size={18} className="text-[var(--color-brand-primary)]" />
                           <span className="text-xs font-bold uppercase tracking-widest">IA Assistente de Engenharia</span>
                         </div>
-                        <p className="text-sm opacity-70">Descreva o projeto para gerar o escopo formal.</p>
+                        <p className="text-sm opacity-70">Descreva o projeto para gerar os <strong>itens</strong> do escopo formal.</p>
                         <div className="flex gap-2">
                           <input 
                             type="text" 
@@ -603,13 +1143,27 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                if (e.key === 'Enter') handleAiGenerateText(aiPrompt);
                             }}
                           />
-                          <button 
+                          <button
                             disabled={aiLoading || !aiPrompt.trim()}
                             onClick={() => handleAiGenerateText(aiPrompt)}
                             className="bg-[var(--color-brand-primary)] px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
                           >
                             {aiLoading ? 'Processando...' : 'Gerar'}
                           </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 w-full">Atalhos rápidos</span>
+                          {AI_SCOPE_PRESETS.map(preset => (
+                            <button
+                              key={preset.label}
+                              disabled={aiLoading}
+                              onClick={() => handleAiGenerateText(preset.prompt)}
+                              className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-40 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                            >
+                              <Sparkles size={12} className="text-[var(--color-brand-primary)]" />
+                              {preset.label}
+                            </button>
+                          ))}
                         </div>
                       </div>
 
@@ -626,7 +1180,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                         <div className="space-y-4">
                           {proposal.technicalScope?.items?.map((item, i) => (
                             <div key={i} className="group bg-black/5 p-6 rounded-xl space-y-4 relative">
-                               <button 
+                               <button
+                                aria-label="Remover item do escopo"
                                 onClick={() => updateTechnical('items', proposal.technicalScope!.items.filter((_, idx) => idx !== i))}
                                 className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"
                                >
@@ -656,7 +1211,89 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                />
                             </div>
                           ))}
+                          {(proposal.technicalScope?.items?.length ?? 0) === 0 && (
+                            <div className="text-center py-8 text-xs opacity-40 italic border border-dashed border-black/10 rounded-xl">
+                              Nenhum item de escopo ainda. Use a IA acima (ou os atalhos) ou "Adicionar Manualmente".
+                            </div>
+                          )}
                         </div>
+                      </div>
+
+                      {/* Matriz de Periodicidade de Manutenção */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Matriz de Periodicidade (Manutenção)</label>
+                          <button
+                            onClick={addMaintenanceRow}
+                            className="text-xs font-bold text-[var(--color-brand-primary)]"
+                          >
+                            + Adicionar Linha
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 w-full">Carregar checklist</span>
+                          {MAINTENANCE_TEMPLATES.map(t => (
+                            <button
+                              key={t.label}
+                              onClick={() => loadMaintenanceTemplate(t.tasks)}
+                              className="flex items-center gap-1.5 bg-black/5 hover:bg-black/10 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                            >
+                              <ClipboardList size={12} className="text-[var(--color-brand-primary)]" /> {t.label}
+                            </button>
+                          ))}
+                        </div>
+                        {(proposal.technicalScope?.maintenancePlan?.length ?? 0) > 0 ? (
+                          <div className="bg-white rounded-xl border border-black/5 overflow-hidden">
+                            <table className="w-full text-left text-sm">
+                              <thead className="text-[10px] uppercase opacity-40 font-bold border-b border-black/5">
+                                <tr>
+                                  <th className="px-4 py-3">Equipamento</th>
+                                  <th className="px-4 py-3">Tipo de Inspeção</th>
+                                  <th className="px-4 py-3 w-40">Frequência</th>
+                                  <th className="px-4 py-3 w-10"></th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-black/5">
+                                {proposal.technicalScope!.maintenancePlan!.map(task => (
+                                  <tr key={task.id} className="group">
+                                    <td className="px-4 py-2">
+                                      <input
+                                        value={task.equipment}
+                                        onChange={e => updateMaintenanceRow(task.id, { equipment: e.target.value })}
+                                        placeholder="Ex: Bomba jockey"
+                                        className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <input
+                                        value={task.inspection}
+                                        onChange={e => updateMaintenanceRow(task.id, { inspection: e.target.value })}
+                                        placeholder="Ex: Teste de pressurização"
+                                        className="w-full bg-transparent border-none focus:ring-0 p-0 text-sm"
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2">
+                                      <select
+                                        value={task.frequency}
+                                        onChange={e => updateMaintenanceRow(task.id, { frequency: e.target.value })}
+                                        className="bg-black/5 rounded-lg px-2 py-1 text-xs font-medium border-transparent focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                                      >
+                                        {FREQUENCIES.map(f => <option key={f} value={f}>{f}</option>)}
+                                      </select>
+                                    </td>
+                                    <td className="px-2 py-2 text-right">
+                                      <button aria-label="Remover linha" onClick={() => removeMaintenanceRow(task.id)}>
+                                        <Trash2 size={14} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-xs opacity-40 italic">Nenhuma rotina de manutenção definida. Use um checklist acima ou adicione linhas manualmente.</p>
+                        )}
                       </div>
                     </motion.div>
                   )}
@@ -669,33 +1306,6 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                        exit={{ opacity: 0, x: -20 }}
                        className="space-y-8 flex-1"
                     >
-                      <div className="grid grid-cols-5 gap-4">
-                        {[
-                          { id: 'manual', label: 'Manual', icon: Calculator, desc: 'Venda Rápida' },
-                          { id: 'engineering', label: 'Engenharia', icon: TrendingUp, desc: 'BDI Técnico' },
-                          { id: 'catalog', label: 'Catálogo', icon: PackageSearch, desc: 'Itens Internos' },
-                          { id: 'spreadsheet', label: 'Planilha', icon: FileSpreadsheet, desc: 'Importar Excel' },
-                          { id: 'erp', label: 'ERP', icon: Zap, desc: 'Sincronizar' },
-                        ].map((mode) => (
-                          <button 
-                            key={mode.id}
-                            onClick={() => updateCommercial('pricingMode', mode.id)}
-                            className={cn(
-                              "p-4 rounded-xl border flex flex-col items-center gap-2 transition-all",
-                              proposal.commercialProposal?.pricingMode === mode.id 
-                                ? "bg-[var(--color-brand-primary)] text-white border-[var(--color-brand-primary)]" 
-                                : "bg-white border-black/5 hover:border-black/10"
-                            )}
-                          >
-                            <mode.icon size={20} />
-                            <div className="text-center">
-                              <p className="text-[10px] font-bold uppercase tracking-widest">{mode.label}</p>
-                              <p className="text-[8px] opacity-60 uppercase">{mode.desc}</p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-
                       <div className="space-y-6">
                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-black/5 p-4 rounded-2xl">
                             <div className="space-y-1">
@@ -730,8 +1340,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                   <th className="px-4 py-3">Descrição</th>
                                   <th className="px-4 py-3 w-20 text-center">Quant.</th>
                                   <th className="px-4 py-3 w-24 text-right">Unitário</th>
+                                  <th className="px-4 py-3 w-36 text-center">Cobrança</th>
                                   <th className="px-4 py-3 w-32 text-right">Total</th>
-                                  <th className="px-4 py-3 w-20 text-center">Ações</th>
                                   <th className="px-4 py-3 w-10"></th>
                                 </tr>
                               </thead>
@@ -791,23 +1401,50 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                         className="w-full bg-transparent border-none focus:ring-0 p-0 text-right text-sm font-mono"
                                       />
                                     </td>
-                                    <td className="px-4 py-2 text-right font-bold text-sm font-mono">
-                                      {formatCurrency(item.totalPrice)}
-                                    </td>
-                                    <td className="px-4 py-2 text-center">
-                                      <button 
-                                        onClick={() => setSelectedItemForPricing({ index: i, item })}
-                                        className={cn(
-                                          "p-1.5 rounded-lg transition-all",
-                                          item.source === 'engineering' ? "bg-orange-100 text-orange-600" : "bg-neutral-100 text-neutral-400 hover:text-neutral-900"
+                                    <td className="px-4 py-2">
+                                      <div className="flex items-center justify-center gap-1">
+                                        <select
+                                          value={item.billingType || 'once'}
+                                          onChange={e => {
+                                            const bt = e.target.value as 'once' | 'monthly';
+                                            const next = proposal.commercialProposal!.items.map((it, idx) =>
+                                              idx === i ? { ...it, billingType: bt, contractMonths: bt === 'monthly' ? (it.contractMonths || 12) : it.contractMonths } : it
+                                            );
+                                            updateCommercial('items', next);
+                                          }}
+                                          className="bg-black/5 rounded-lg px-2 py-1 text-xs font-medium focus:ring-1 focus:ring-[var(--color-brand-primary)] border-transparent"
+                                        >
+                                          <option value="once">Único</option>
+                                          <option value="monthly">Mensal</option>
+                                        </select>
+                                        {item.billingType === 'monthly' && (
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            value={item.contractMonths || 12}
+                                            onChange={e => {
+                                              const m = parseInt(e.target.value) || 1;
+                                              const next = proposal.commercialProposal!.items.map((it, idx) =>
+                                                idx === i ? { ...it, contractMonths: m } : it
+                                              );
+                                              updateCommercial('items', next);
+                                            }}
+                                            className="w-12 bg-black/5 rounded-lg px-1 py-1 text-xs text-center font-mono border-transparent focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                                            title="Meses de contrato"
+                                          />
                                         )}
-                                        title="Formação de Preço (BDI)"
-                                      >
-                                        <Calculator size={14} />
-                                      </button>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-2 text-right font-bold text-sm font-mono">
+                                      {formatCurrency(itemContractValue(item))}
+                                      {item.billingType === 'monthly' && (
+                                        <span className="block text-[9px] font-normal opacity-50">
+                                          {formatCurrency(item.totalPrice)}/mês × {item.contractMonths || 12}
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-2 py-2 text-right">
-                                      <button onClick={() => updateCommercial('items', proposal.commercialProposal!.items.filter((_, idx) => idx !== i))}>
+                                      <button aria-label="Remover item" onClick={() => updateCommercial('items', proposal.commercialProposal!.items.filter((_, idx) => idx !== i))}>
                                         <Trash2 size={14} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                                       </button>
                                     </td>
@@ -820,6 +1457,58 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                 Nenhum item adicionado à precificação.
                               </div>
                             )}
+                         </div>
+
+                         {/* Serviços sob demanda / chamados */}
+                         <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 space-y-4">
+                           <div className="flex items-center justify-between">
+                             <div className="space-y-1">
+                               <h3 className="text-sm font-bold uppercase tracking-widest text-black">Serviços sob Demanda</h3>
+                               <p className="text-[10px] opacity-40 font-bold uppercase tracking-wider">Tabela de preços para chamados/extras — não soma no valor do contrato</p>
+                             </div>
+                             <button
+                               onClick={addOnDemandService}
+                               className="bg-black/5 text-black px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-black/10 transition-all shrink-0"
+                             >
+                               <Plus size={14} /> Adicionar
+                             </button>
+                           </div>
+                           {onDemandServices.length > 0 ? (
+                             <div className="space-y-2">
+                               {onDemandServices.map(svc => (
+                                 <div key={svc.id} className="flex items-center gap-2">
+                                   <input
+                                     type="text"
+                                     value={svc.description}
+                                     onChange={e => updateOnDemandService(svc.id, { description: e.target.value })}
+                                     placeholder="Ex: Chamado emergencial"
+                                     className="flex-1 p-2 bg-black/5 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                                   />
+                                   <input
+                                     type="text"
+                                     value={svc.unit}
+                                     onChange={e => updateOnDemandService(svc.id, { unit: e.target.value })}
+                                     placeholder="por visita"
+                                     className="w-28 p-2 bg-black/5 rounded-lg text-xs text-center focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                                   />
+                                   <input
+                                     type="number"
+                                     step="0.01"
+                                     min="0"
+                                     value={svc.price === 0 ? '' : svc.price}
+                                     onChange={e => updateOnDemandService(svc.id, { price: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                                     placeholder="0,00"
+                                     className="w-28 p-2 bg-black/5 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-1 focus:ring-[var(--color-brand-primary)]"
+                                   />
+                                   <button aria-label="Remover serviço" onClick={() => removeOnDemandService(svc.id)} className="p-1">
+                                     <Trash2 size={14} className="text-red-500" />
+                                   </button>
+                                 </div>
+                               ))}
+                             </div>
+                           ) : (
+                             <p className="text-xs opacity-40 italic">Nenhum serviço sob demanda cadastrado.</p>
+                           )}
                          </div>
                       </div>
 
@@ -847,12 +1536,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
 
                          <div className="space-y-6 flex flex-col justify-between">
                             <div className="space-y-4">
-                               <div className="flex items-center justify-between">
-                                 <span className="text-xs font-bold uppercase tracking-widest opacity-40">Subtotal</span>
-                                 <span className="font-mono text-sm">{formatCurrency(calculateTotal(proposal.commercialProposal?.items || []))}</span>
-                               </div>
                                <div className="flex items-center justify-between text-[var(--color-brand-primary)]">
-                                 <span className="text-xs font-bold uppercase tracking-widest">Valor Final Sugerido</span>
+                                 <span className="text-xs font-bold uppercase tracking-widest">Valor Total do Contrato</span>
                                  <span className="font-bold text-2xl tracking-tighter">
                                    {formatCurrency(calculateTotal(proposal.commercialProposal?.items || []))}
                                  </span>
@@ -861,9 +1546,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                             <div className="p-4 bg-orange-50 rounded-xl flex gap-3">
                               <AlertCircle size={20} className="text-orange-500 shrink-0" />
                               <p className="text-xs text-orange-700 italic">
-                                {proposal.commercialProposal?.pricingMode === 'erp' ? 
-                                  "Modo ERP Ativo: Preços sincronizados em tempo real." : 
-                                  "Use o modo Catálogo para maior precisão."}
+                                Use "Buscar Orçamento" para importar itens com BDI aplicado do módulo de Orçamentos.
                               </p>
                             </div>
                          </div>
@@ -881,7 +1564,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                           </div>
                           <div className="space-y-4">
                             <label className="text-xs font-bold uppercase tracking-widest opacity-40">Garantia</label>
-                            <textarea 
+                            <textarea
                               value={proposal.commercialProposal?.guarantee}
                               onChange={e => updateCommercial('guarantee', e.target.value)}
                               rows={2}
@@ -889,108 +1572,10 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                             />
                           </div>
                        </div>
+
                     </motion.div>
                   )}
 
-                  {step === 5 && (
-                    <motion.div 
-                       key="step-5"
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       exit={{ opacity: 0, x: -20 }}
-                       className="flex-1"
-                    >
-                      <PricingFormulation 
-                        proposal={proposal}
-                        onChange={(pricing) => setProposal(prev => ({ ...prev, pricing }))}
-                        onApply={(total) => {
-                          updateCommercial('totalValue', total);
-                        }}
-                      />
-                    </motion.div>
-                  )}
-
-                  {step === 6 && (
-                    <motion.div 
-                       key="step-6"
-                       initial={{ opacity: 0, x: 20 }}
-                       animate={{ opacity: 1, x: 0 }}
-                       exit={{ opacity: 0, x: -20 }}
-                       className="space-y-8 flex-1"
-                    >
-                      <div className="flex flex-col gap-6">
-                        <div className="bg-neutral-900 text-white p-8 rounded-[2rem] shadow-2xl space-y-8 relative overflow-hidden">
-                          <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl -mr-32 -mt-32" />
-                          
-                          <div className="flex items-center justify-between relative z-10">
-                            <div>
-                              <h3 className="text-2xl font-black tracking-tight uppercase">Engenharia Financeira ERP</h3>
-                              <p className="text-xs font-bold text-white/40 uppercase tracking-widest">Pricing Workbench & Margin Analysis</p>
-                            </div>
-                            <div className="bg-white/10 px-4 py-2 rounded-xl backdrop-blur-md border border-white/10">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 mr-3">Status Global:</span>
-                              <span className="text-sm font-black text-green-400 uppercase tracking-tighter">Saudável</span>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-4">
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Valor Total da Proposta</span>
-                              <p className="text-3xl font-black tabular-nums tracking-tighter">{formatCurrency(proposal.commercialProposal?.totalValue || 0)}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Custo Direto Total</span>
-                              <p className="text-3xl font-black tabular-nums tracking-tighter opacity-60">{formatCurrency((proposal.commercialProposal?.totalValue || 0) * 0.7)}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Lucro Bruto Estimado</span>
-                              <p className="text-3xl font-black tabular-nums tracking-tighter text-[var(--color-brand-primary)]">{formatCurrency((proposal.commercialProposal?.totalValue || 0) * 0.15)}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                           <div className="bg-white p-6 rounded-2xl border border-black/5 space-y-4">
-                             <h4 className="text-xs font-black uppercase tracking-widest text-neutral-400">Análise de Pontos de Equilíbrio</h4>
-                             <div className="h-40 flex items-end gap-2 px-2">
-                               {[45, 60, 30, 80, 50, 90, 40].map((h, i) => (
-                                 <div key={i} className="flex-1 bg-black/5 rounded-t-lg relative group transition-all hover:bg-[var(--color-brand-primary)]" style={{height: `${h}%`}}>
-                                   <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[8px] font-bold opacity-0 group-hover:opacity-100 transition-opacity">R$ {h}k</div>
-                                 </div>
-                               ))}
-                             </div>
-                             <div className="flex justify-between text-[9px] font-black uppercase tracking-widest opacity-30 pt-2 border-t border-black/5">
-                               <span>Jan</span><span>Fev</span><span>Mar</span><span>Abr</span><span>Mai</span><span>Jun</span><span>Jul</span>
-                             </div>
-                           </div>
-
-                           <div className="bg-white p-6 rounded-2xl border border-black/5 space-y-6">
-                             <h4 className="text-xs font-black uppercase tracking-widest text-neutral-400">Guardrails & Riscos</h4>
-                             <div className="space-y-4">
-                               {[
-                                 { label: 'Margem de Contribuição', value: 24, status: 'healthy' },
-                                 { label: 'Custo de Aquisição (CAC)', value: 8, status: 'healthy' },
-                                 { label: 'Exposição Financeira', value: 12, status: 'warning' }
-                               ].map((g, i) => (
-                                 <div key={i} className="space-y-2">
-                                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest">
-                                     <span>{g.label}</span>
-                                     <span>{g.value}%</span>
-                                   </div>
-                                   <div className="h-1.5 bg-black/5 rounded-full overflow-hidden">
-                                     <div 
-                                      className={cn("h-full rounded-full transition-all duration-1000", g.status === 'healthy' ? 'bg-green-400' : 'bg-yellow-400')} 
-                                      style={{width: `${g.value * 3}%`}} 
-                                     />
-                                   </div>
-                                 </div>
-                               ))}
-                             </div>
-                           </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
                 </AnimatePresence>
 
                 {/* Footer actions */}
@@ -1012,8 +1597,8 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                         <Save size={16} /> {loading ? 'Salvando...' : 'Salvar Rascunho'}
                       </button>
                       
-                      {step < 6 ? (
-                        <button 
+                      {step < TOTAL_STEPS ? (
+                        <button
                           onClick={() => setStep(step + 1)}
                           className="px-8 py-2 bg-[var(--color-brand-primary)] text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:opacity-90 transition-all font-mono"
                         >
@@ -1067,49 +1652,10 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
               </div>
             </div>
 
-            <div className="bg-[var(--color-brand-dark)] text-white p-6 rounded-2xl space-y-4">
-               <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40">Anexos Inteligentes</h3>
-               <div className="space-y-3">
-                  {['Folder Corporativo', 'Tabela de Bombas', 'Certificações NR'].map(file => (
-                    <div key={file} className="flex items-center justify-between text-xs p-2 bg-white/5 rounded-lg hover:bg-white/10 cursor-pointer transition-colors">
-                      <span>{file}.pdf</span>
-                      <Plus size={12} className="opacity-40" />
-                    </div>
-                  ))}
-               </div>
-               <p className="text-[9px] opacity-40 leading-relaxed italic">
-                 Anexos selecionados serão "costurados" automaticamente ao PDF final.
-               </p>
-            </div>
           </div>
         )}
       </div>
 
-      <AnimatePresence>
-        {selectedItemForPricing && (
-          <PriceFormationModal 
-            itemDescription={selectedItemForPricing.item.description || "Novo Item"}
-            initialData={selectedItemForPricing.item.priceFormation}
-            onClose={() => setSelectedItemForPricing(null)}
-            onSave={(pricing) => {
-              const next = proposal.commercialProposal!.items.map((it, idx) => {
-                if (idx === selectedItemForPricing.index) {
-                  return { 
-                    ...it, 
-                    unitPrice: pricing.finalPrice, 
-                    totalPrice: (it.quantity || 1) * pricing.finalPrice,
-                    source: 'engineering' as const,
-                    priceFormation: pricing
-                  };
-                }
-                return it;
-              });
-              updateCommercial('items', next);
-              setSelectedItemForPricing(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
       {showBudgetSelector && (
         <BudgetSelector 
           onSelect={handleBudgetSelect} 

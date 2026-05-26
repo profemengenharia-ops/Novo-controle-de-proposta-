@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Proposal } from '../types';
+import { Proposal, ProposalStatus } from '../types';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
@@ -16,7 +16,6 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
   const [loading, setLoading] = useState(!initialProposal);
 
   useEffect(() => {
-    // 1. Fetch initial state if not provided
     if (!initialProposal) {
       const fetchProposal = async () => {
         const { data, error } = await supabase
@@ -24,18 +23,12 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
           .select('*')
           .eq('id', proposalId)
           .single();
-        
-        if (data && !error) {
-          // Note: mapFromDb logic would go here if we used the service, 
-          // but for realtime we might need a direct mapping
-          setProposal(data as any); 
-        }
+        if (data && !error) setProposal(data as any);
         setLoading(false);
       };
       fetchProposal();
     }
 
-    // 2. Realtime subscription for this specific proposal
     const channel = supabase
       .channel(`proposal_update_${proposalId}`)
       .on(
@@ -47,11 +40,8 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
           filter: `id=eq.${proposalId}`,
         },
         (payload) => {
-          console.log('[Realtime] Mudança detectada!', payload.new);
           const updated = payload.new as any;
           setProposal(updated);
-          
-          // Notifications based on new status
           if (updated.status === 'calculado') {
             toast.success('Engenharia financeira concluída com sucesso!');
           } else if (updated.status === 'estimado_manualmente') {
@@ -74,8 +64,8 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
     );
   }
 
-  const isCalculated = proposal.status === 'calculado';
-  const isPending = proposal.status === 'calculando' || proposal.status === 'pendente';
+  const isCalculated = proposal.status === ProposalStatus.WON;
+  const isPending = proposal.status === ProposalStatus.DRAFT || proposal.status === ProposalStatus.NEGOTIATING;
 
   return (
     <motion.div 

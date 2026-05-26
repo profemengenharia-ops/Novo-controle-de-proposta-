@@ -9,13 +9,11 @@ import {
   ExternalLink, 
   Edit, 
   Trash2,
-  Copy,
   Bell,
   MessageSquare,
-  ChevronDown,
-  ChevronUp,
   Download,
   History,
+  Copy,
   Send,
   Plus,
   X,
@@ -31,6 +29,8 @@ import {
 import { formatCurrency, formatDate, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { STATUS_TAGS } from '../constants';
+import { downloadProposalDocx } from '../lib/proposalDocx';
+import { toast } from 'sonner';
 
 interface ProposalListProps {
   onEdit: (id: string) => void;
@@ -48,6 +48,8 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   const [lossReasonProposalId, setLossReasonProposalId] = useState<string | null>(null);
   const [lossReason, setLossReason] = useState('');
   const [activeTab, setActiveTab] = useState<Record<string, 'overview' | 'technical' | 'commercial' | 'history'>>({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const setProposalTab = (id: string, tab: 'overview' | 'technical' | 'commercial' | 'history') => {
     setActiveTab(prev => ({ ...prev, [id]: tab }));
@@ -55,11 +57,28 @@ export function ProposalList({ onEdit }: ProposalListProps) {
 
   useEffect(() => {
     async function load() {
-      const data = await proposalService.getAllProposals();
-      setProposals(data);
+      try {
+        const data = await proposalService.getAllProposals();
+        setProposals(data);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
+
+  // Fecha o menu de ações ao clicar fora ou pressionar Esc.
+  useEffect(() => {
+    if (!activeActionsMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setActiveActionsMenu(null); };
+    const onClick = () => setActiveActionsMenu(null);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('click', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('click', onClick);
+    };
+  }, [activeActionsMenu]);
 
   const filteredProposals = proposals.filter(p => {
     const searchTerm = filter.toLowerCase();
@@ -70,10 +89,32 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     return matchesSearch && matchesStatus;
   });
 
-  const handleDelete = async (id: string) => {
-    if (confirm('Deseja realmente excluir esta proposta?')) {
-      await proposalService.deleteProposal(id);
-      setProposals(proposals.filter(p => p.id !== id));
+  const handleDelete = (id: string) => {
+    setConfirmDeleteId(id);
+  };
+
+  const handleDownloadDocx = async (p: Proposal) => {
+    try {
+      toast.loading('Gerando documento Word…', { id: `docx-${p.id}` });
+      await downloadProposalDocx(p);
+      toast.success('Documento Word gerado com sucesso!', { id: `docx-${p.id}` });
+    } catch (err) {
+      console.error('[docx] Falha ao gerar proposta:', err);
+      toast.error('Não foi possível gerar o documento Word.', { id: `docx-${p.id}` });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmDeleteId) return;
+    try {
+      await proposalService.deleteProposal(confirmDeleteId);
+      setProposals(proposals.filter(p => p.id !== confirmDeleteId));
+      toast.success('Proposta excluída.');
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao excluir proposta.');
+    } finally {
+      setConfirmDeleteId(null);
     }
   };
 
@@ -105,19 +146,52 @@ export function ProposalList({ onEdit }: ProposalListProps) {
 
   const handleDuplicateWithRevision = async (p: Proposal) => {
     const { id, createdAt, updatedAt, ...rest } = p;
-    const nextRev = String(parseInt(rest.revision) + 1).padStart(2, '0');
+    const baseRev = parseInt(rest.revision);
+    const nextRev = String((Number.isFinite(baseRev) ? baseRev : 0) + 1).padStart(2, '0');
     const newProposal: Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'> = {
       ...rest,
       revision: nextRev,
       status: ProposalStatus.DRAFT,
     };
-    // In a real app we'd call createProposal
-    const newId = await proposalService.createProposal(newProposal);
-    const createdProposal = await proposalService.getProposal(newId);
-    if (createdProposal) {
-      setProposals([createdProposal, ...proposals]);
+    try {
+      const newId = await proposalService.createProposal(newProposal);
+      const createdProposal = await proposalService.getProposal(newId);
+      if (createdProposal) {
+        setProposals([createdProposal, ...proposals]);
+      }
+      toast.success(`Revisão ${nextRev} gerada com sucesso!`);
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao duplicar proposta.');
     }
-    alert(`Revisão ${nextRev} gerada com sucesso!`);
+  };
+
+  const handleCloneProposal = async (p: Proposal) => {
+    // Clonagem total: nova proposta (novo número, revisão 00) reaproveitando
+    // toda a estrutura. Diferente de "Gerar Nova Revisão" (mesma proposta).
+    const { id, createdAt, updatedAt, ...rest } = p;
+    const newProposal: Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'> = {
+      ...rest,
+      proposalNumber: `PF-${new Date().getFullYear()}-${crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4)}`,
+      revision: '00',
+      status: ProposalStatus.DRAFT,
+      scopeTitle: rest.scopeTitle ? `${rest.scopeTitle} (Cópia)` : rest.scopeTitle,
+      revisions: [],
+      interactions: [],
+      lossReason: undefined,
+      followUpDate: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    };
+    try {
+      const newId = await proposalService.createProposal(newProposal);
+      const created = await proposalService.getProposal(newId);
+      if (created) setProposals([created, ...proposals]);
+      setActiveActionsMenu(null);
+      toast.success('Proposta clonada! Abrindo para edição…');
+      onEdit(newId);
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao clonar proposta.');
+    }
   };
 
   const handleStatusUpdate = async (id: string, newStatus: ProposalStatus) => {
@@ -187,8 +261,8 @@ export function ProposalList({ onEdit }: ProposalListProps) {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-        <table className="w-full text-left">
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-x-auto">
+        <table className="w-full text-left min-w-[900px]">
           <thead className="bg-black/[0.02]">
             <tr className="text-[10px] font-bold uppercase tracking-widest opacity-40">
               <th className="px-8 py-4">ID & Rev</th>
@@ -247,7 +321,9 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                   </td>
                   <td className="px-8 py-5 text-right relative">
                     <div className="flex items-center justify-end gap-2">
-                       <button 
+                       <button
+                        aria-label="Ações da proposta"
+                        aria-haspopup="true"
                         onClick={(e) => { e.stopPropagation(); setActiveActionsMenu(activeActionsMenu === p.id ? null : p.id) }}
                         className="p-2 hover:bg-black/5 rounded-lg text-black/60 transition-all"
                        >
@@ -265,11 +341,17 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             <button onClick={() => handleDuplicateWithRevision(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <History size={14} className="opacity-40" /> Gerar Nova Revisão
                             </button>
-                            <button onClick={() => window.open(`/proposal/${p.id}`, '_blank')} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                            <button onClick={() => handleCloneProposal(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                              <Copy size={14} className="opacity-40" /> Clonar Proposta
+                            </button>
+                            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/proposal/${p.id}`).then(() => toast.success('Link copiado!')); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <ExternalLink size={14} className="opacity-40" /> Copiar Link Público
                             </button>
-                            <button className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                            <button onClick={() => { window.open(`/proposal/${p.id}?print=1`, '_blank'); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Download size={14} className="opacity-40" /> Baixar PDF
+                            </button>
+                            <button onClick={() => { handleDownloadDocx(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                              <FileText size={14} className="opacity-40" /> Baixar Word (.docx)
                             </button>
                             <button onClick={() => { setInteractionId(p.id); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-[var(--color-brand-primary)]/10 text-[var(--color-brand-primary)] font-bold transition-colors">
                               <MessageSquare size={14} className="opacity-40" /> Registrar Interação
@@ -371,7 +453,7 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                                         </div>
                                         <div>
                                           <p className="text-[8px] font-black uppercase text-neutral-400">Probabilidade</p>
-                                          <p className="text-sm font-bold">Alta (IA Calc)</p>
+                                          <p className="text-sm font-bold">{p.status === ProposalStatus.WON ? 'Ganha' : p.status === ProposalStatus.NEGOTIATING ? 'Média' : p.status === ProposalStatus.SENT ? 'Alta' : p.status === ProposalStatus.LOST ? 'Perdida' : 'Em aberto'}</p>
                                         </div>
                                       </div>
                                       <div className="p-4 border border-neutral-100 rounded-2xl flex items-center gap-3">
@@ -567,7 +649,13 @@ export function ProposalList({ onEdit }: ProposalListProps) {
           </tbody>
         </table>
         
-        {filteredProposals.length === 0 && (
+        {loading ? (
+          <div className="p-8 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-14 bg-black/5 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : filteredProposals.length === 0 && (
           <div className="p-20 text-center space-y-4">
              <div className="mx-auto w-16 h-16 bg-black/5 rounded-full flex items-center justify-center opacity-40">
                <Search size={32} />
@@ -668,6 +756,43 @@ export function ProposalList({ onEdit }: ProposalListProps) {
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-8 space-y-6"
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center shrink-0">
+                  <AlertCircle size={24} className="text-red-600" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-bold text-lg">Excluir proposta?</h3>
+                  <p className="text-xs opacity-60">Esta ação não pode ser desfeita.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-3 text-xs font-bold uppercase tracking-widest opacity-60 hover:opacity-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-[2] py-3 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-700 transition-all"
+                >
+                  Excluir
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

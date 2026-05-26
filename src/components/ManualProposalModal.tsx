@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { ProposalStatus, Proposal } from '../types';
 import { proposalService } from '../services/proposalService';
 import { useAuth } from '../hooks/useAuth';
-import { X, Save, Upload, Calendar } from 'lucide-react';
+import { X, Save, Calendar } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { STATUS_TAGS } from '../constants';
 
 interface ManualProposalModalProps {
   onClose: () => void;
@@ -37,7 +38,7 @@ export function ManualProposalModal({ onClose, onComplete }: ManualProposalModal
         status: formData.status,
         validityDays: 30,
         deadline: '',
-        createdBy: user?.uid || 'manual',
+        createdBy: user?.id || 'manual',
         followUpDate: formData.followUpDate,
         contractDetails: {
           contractNumber: formData.contractNumber,
@@ -136,7 +137,7 @@ export function ManualProposalModal({ onClose, onComplete }: ManualProposalModal
                   onChange={e => setFormData({...formData, status: e.target.value as any})}
                 >
                   {Object.entries(ProposalStatus).map(([key, val]) => (
-                    <option key={key} value={val}>{val.toUpperCase()}</option>
+                    <option key={key} value={val}>{STATUS_TAGS[val as ProposalStatus]?.label || val}</option>
                   ))}
                 </select>
               </div>
@@ -192,13 +193,6 @@ export function ManualProposalModal({ onClose, onComplete }: ManualProposalModal
               </div>
            </div>
 
-           <div className="pt-4">
-              <label className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-2 block">Upload do PDF Pronto (Opcional)</label>
-              <div className="border-2 border-dashed border-black/5 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 hover:border-[var(--color-brand-primary)]/20 transition-all cursor-pointer">
-                 <Upload size={24} className="opacity-20" />
-                 <p className="text-[10px] uppercase font-bold opacity-40">Arraste ou clique para anexar o PDF</p>
-              </div>
-           </div>
         </form>
 
         <div className="mt-8 pt-8 border-t border-black/5 flex gap-4">
