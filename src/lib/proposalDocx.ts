@@ -221,6 +221,25 @@ function listItem(text: string) {
   });
 }
 
+/**
+ * Renderiza um item de escopo no padrão do anexo: a categoria vira um título
+ * em negrito (ex.: "Bomba Jockey:") e cada linha da descrição vira um item de
+ * lista — para leitura fácil de quem lê a proposta. Sem categoria, lista direto.
+ */
+function scopeItemBlock(category?: string, description?: string): Paragraph[] {
+  const cat = (category || '').trim();
+  const lines = (description || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const out: Paragraph[] = [];
+  if (cat) {
+    out.push(new Paragraph({
+      spacing: { before: 100, after: 30 },
+      children: [new TextRun({ text: cat.endsWith(':') ? cat : `${cat}:`, font: SANS, bold: true, size: 22, color: INK })],
+    }));
+  }
+  lines.forEach(l => out.push(listItem(l)));
+  return out;
+}
+
 // ── Tabela chave/valor ────────────────────────────────────────────────────────
 function kvTable(rows: [string, string][]) {
   return new Table({
@@ -809,7 +828,7 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
   children.push(lead(sc.generalConsiderations?.trim() || DEFAULT_OBJETO));
   if (sc.items?.length) {
     children.push(hSub('Escopo de fornecimento'));
-    sc.items.forEach(it => children.push(listItem(it.category ? `${it.category} — ${it.description}` : it.description)));
+    sc.items.forEach(it => children.push(...scopeItemBlock(it.category, it.description)));
   }
   children.push(hSub('Normas técnicas de referência'));
   children.push(normsTable(norms));

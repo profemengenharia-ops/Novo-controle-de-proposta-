@@ -142,12 +142,21 @@ export function PublicProposalView({ id }: PublicViewProps) {
               <div className="space-y-6">
                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-400">Escopo de Fornecimento</h3>
                  <div className="space-y-8">
-                   {proposal.technicalScope?.items?.map((item, i) => (
-                     <div key={i} className="space-y-2">
-                       <h4 className="text-sm font-bold text-orange-500 uppercase tracking-wider">{item.category}</h4>
-                       <p className="text-neutral-600 leading-relaxed text-lg">{item.description}</p>
-                     </div>
-                   ))}
+                   {proposal.technicalScope?.items?.map((item, i) => {
+                     const lines = (item.description || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                     return (
+                       <div key={i} className="space-y-2">
+                         <h4 className="text-sm font-bold text-orange-500 uppercase tracking-wider">{item.category}</h4>
+                         {lines.length > 1 ? (
+                           <ul className="list-disc pl-5 space-y-1">
+                             {lines.map((l, j) => <li key={j} className="text-neutral-600 leading-relaxed text-lg">{l}</li>)}
+                           </ul>
+                         ) : (
+                           <p className="text-neutral-600 leading-relaxed text-lg" style={{ whiteSpace: 'pre-line' }}>{item.description}</p>
+                         )}
+                       </div>
+                     );
+                   })}
                  </div>
               </div>
 

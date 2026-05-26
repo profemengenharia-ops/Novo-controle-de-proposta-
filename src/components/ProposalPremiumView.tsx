@@ -309,9 +309,16 @@ export function ProposalPremiumView({ proposal, autoPrint = false }: Props) {
           {sc.items?.length > 0 && (
             <>
               <HSub>Escopo de fornecimento</HSub>
-              <ul style={ulStyle}>
-                {sc.items.map((it, i) => <li key={i}>{it.category ? `${it.category} — ${it.description}` : it.description}</li>)}
-              </ul>
+              {sc.items.map((it, i) => {
+                const cat = (it.category || '').trim();
+                const lines = (it.description || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                return (
+                  <div key={i} style={{ margin: '4px 0 8px' }}>
+                    {cat && <p style={{ margin: '6px 0 2px', fontWeight: 700, color: C.ink, fontSize: '11pt' }}>{cat.endsWith(':') ? cat : `${cat}:`}</p>}
+                    {lines.length > 0 && <ul style={{ ...ulStyle, margin: '2px 0 0' }}>{lines.map((l, j) => <li key={j}>{l}</li>)}</ul>}
+                  </div>
+                );
+              })}
             </>
           )}
           <HSub>Normas técnicas de referência</HSub>
