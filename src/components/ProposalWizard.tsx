@@ -19,7 +19,8 @@ import {
   Search,
   MapPin,
   CalendarClock,
-  ClipboardList
+  ClipboardList,
+  Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, formatDate, itemContractValue } from '../lib/utils';
@@ -32,7 +33,7 @@ import { BudgetProject } from '../types';
 import { normsService, Norm, Block } from '../services/normsService';
 import { calculateBDI } from '../lib/utils';
 import { crmService } from '../services/crmService';
-import { Vendor, CRMClient } from '../types';
+import { Vendor, CRMClient, CRMOpportunity } from '../types';
 
 interface WizardProps {
   proposalId?: string;
@@ -114,6 +115,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [validationErrors, setValidationErrors] = useState<{ clientName?: string; scopeTitle?: string }>({});
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [clients, setClients] = useState<CRMClient[]>([]);
+  const [opportunities, setOpportunities] = useState<CRMOpportunity[]>([]);
   const [normSearch, setNormSearch] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [isDirty, setIsDirty] = useState(false);
@@ -192,6 +194,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     normsService.getBlocks().then(setLibraryBlocks).catch(console.error);
     crmService.getVendors().then(vs => setVendors(vs.filter(v => v.active))).catch(console.error);
     crmService.getClients().then(setClients).catch(console.error);
+    crmService.getOpportunities().then(setOpportunities).catch(console.error);
   }, []);
 
   // Marca a maior etapa já alcançada (para permitir voltar/pular para etapas visitadas).
@@ -529,6 +532,35 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     c => c.name.trim().toLowerCase() === (proposal.clientName || '').trim().toLowerCase()
   );
 
+  // Obras / oportunidades cadastradas no CRM para o cliente selecionado.
+  const clientKey = (proposal.clientName || '').trim().toLowerCase();
+  const clientOpportunities = clientKey
+    ? opportunities.filter(o => (o.clientName || '').trim().toLowerCase() === clientKey)
+    : [];
+
+  // Ao escolher uma obra, herda título do escopo e vendedor responsável.
+  const selectObra = (opp: CRMOpportunity) => {
+    const vendor = opp.vendorId ? vendors.find(v => v.id === opp.vendorId) : undefined;
+    setProposal(prev => ({
+      ...prev,
+      scopeTitle: opp.title,
+      vendorId: vendor?.id ?? prev.vendorId,
+      vendorName: vendor?.name ?? prev.vendorName,
+    }));
+    if (validationErrors.scopeTitle) setValidationErrors(prev => ({ ...prev, scopeTitle: undefined }));
+    if (!isDirty) setIsDirty(true);
+    toast.success(`Obra vinculada: ${opp.title}`);
+  };
+
+  const OPP_STAGE_LABELS: Record<string, string> = {
+    prospecting: 'Prospecção',
+    qualification: 'Qualificação',
+    proposal: 'Proposta',
+    negotiation: 'Negociação',
+    won: 'Ganha',
+    lost: 'Perdida',
+  };
+
   // Data-limite de validade = base (emissão/hoje) + dias de validade.
   const validityBase = proposal.createdAt ? new Date(proposal.createdAt) : new Date();
   const validityLimitISO = Number.isFinite(proposal.validityDays) && (proposal.validityDays || 0) > 0
@@ -689,6 +721,54 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                             </p>
                           )}
                         </div>
+
+                        {/* Obras / Oportunidades cadastradas do cliente */}
+                        {clientKey && (
+                          <div className="space-y-3 col-span-2">
+                            <label className="text-xs font-bold uppercase tracking-widest opacity-40 flex items-center gap-2">
+                              <Building2 size={13} className="text-[var(--color-brand-primary)]" />
+                              Obras cadastradas deste cliente
+                            </label>
+                            {clientOpportunities.length > 0 ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {clientOpportunities.map(opp => {
+                                  const isSelected = (proposal.scopeTitle || '').trim().toLowerCase() === opp.title.trim().toLowerCase();
+                                  return (
+                                    <button
+                                      key={opp.id}
+                                      type="button"
+                                      onClick={() => selectObra(opp)}
+                                      aria-label={`Vincular obra ${opp.title}`}
+                                      className={cn(
+                                        "text-left p-4 rounded-xl border transition-all group",
+                                        isSelected
+                                          ? "bg-[var(--color-brand-primary)]/5 border-[var(--color-brand-primary)]/40 shadow-sm"
+                                          : "bg-black/[0.02] border-black/5 hover:border-[var(--color-brand-primary)]/30 hover:bg-black/[0.04]"
+                                      )}
+                                    >
+                                      <div className="flex items-start justify-between gap-2">
+                                        <p className="font-bold text-sm leading-tight">{opp.title}</p>
+                                        {isSelected && <Check size={16} className="text-[var(--color-brand-primary)] shrink-0" />}
+                                      </div>
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <span className="text-xs font-mono opacity-60">{formatCurrency(opp.value || 0)}</span>
+                                        <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-black/5 opacity-50">
+                                          {OPP_STAGE_LABELS[opp.stage] || opp.stage}
+                                        </span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] opacity-40 italic px-1">
+                                {matchedClient
+                                  ? 'Nenhuma obra cadastrada para este cliente no CRM. Cadastre a obra em Comercial → Oportunidades.'
+                                  : 'Selecione um cliente do CRM para listar as obras vinculadas.'}
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                         <div className="space-y-2 col-span-2">
                           <label className="text-xs font-bold uppercase tracking-widest opacity-40">Vendedor Responsável</label>
