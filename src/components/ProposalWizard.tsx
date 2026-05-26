@@ -29,6 +29,7 @@ import { CommercialItem, OnDemandService } from '../types';
 
 import { ProposalPremiumView } from './ProposalPremiumView';
 import { BudgetSelector } from './BudgetSelector';
+import { budgetProjectService } from '../services/budgetProjectService';
 import { BudgetProject } from '../types';
 import { normsService, Norm, Block } from '../services/normsService';
 import { calculateBDI } from '../lib/utils';
@@ -116,6 +117,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [clients, setClients] = useState<CRMClient[]>([]);
   const [opportunities, setOpportunities] = useState<CRMOpportunity[]>([]);
+  const [budgetProjects, setBudgetProjects] = useState<BudgetProject[]>([]);
   const [normSearch, setNormSearch] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [isDirty, setIsDirty] = useState(false);
@@ -195,6 +197,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     crmService.getVendors().then(vs => setVendors(vs.filter(v => v.active))).catch(console.error);
     crmService.getClients().then(setClients).catch(console.error);
     crmService.getOpportunities().then(setOpportunities).catch(console.error);
+    budgetProjectService.getAll().then(setBudgetProjects).catch(console.error);
   }, []);
 
   // Marca a maior etapa já alcançada (para permitir voltar/pular para etapas visitadas).
@@ -561,6 +564,19 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
     lost: 'Perdida',
   };
 
+  // Obra atualmente vinculada (pelo título do escopo) e seus orçamentos.
+  const selectedObra = clientOpportunities.find(
+    o => o.title.trim().toLowerCase() === (proposal.scopeTitle || '').trim().toLowerCase()
+  );
+  const linkedBudgets = selectedObra
+    ? budgetProjects.filter(b => b.originOpportunityId === selectedObra.id)
+    : [];
+  const clientBudgets = clientKey
+    ? budgetProjects.filter(b => (b.clientName || '').trim().toLowerCase() === clientKey)
+    : [];
+  // Prefere orçamentos vinculados à obra; senão, mostra os do cliente.
+  const obraBudgets = linkedBudgets.length > 0 ? linkedBudgets : clientBudgets;
+
   // Data-limite de validade = base (emissão/hoje) + dias de validade.
   const validityBase = proposal.createdAt ? new Date(proposal.createdAt) : new Date();
   const validityLimitISO = Number.isFinite(proposal.validityDays) && (proposal.validityDays || 0) > 0
@@ -766,6 +782,49 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                   ? 'Nenhuma obra cadastrada para este cliente no CRM. Cadastre a obra em Comercial → Oportunidades.'
                                   : 'Selecione um cliente do CRM para listar as obras vinculadas.'}
                               </p>
+                            )}
+
+                            {/* Orçamentos da obra selecionada — importação rápida */}
+                            {selectedObra && obraBudgets.length > 0 && (
+                              <div className="rounded-xl border border-[var(--color-brand-primary)]/15 bg-[var(--color-brand-primary)]/[0.03] p-4 space-y-3 mt-1">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-brand-primary)] flex items-center gap-2">
+                                    <Calculator size={13} />
+                                    {linkedBudgets.length > 0 ? 'Orçamentos vinculados a esta obra' : 'Orçamentos deste cliente'}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowBudgetSelector(true)}
+                                    className="text-[10px] font-bold uppercase tracking-widest opacity-40 hover:opacity-100 transition-opacity"
+                                  >
+                                    Ver todos
+                                  </button>
+                                </div>
+                                <div className="space-y-2">
+                                  {obraBudgets.map(b => (
+                                    <div key={b.id} className="flex items-center gap-3 bg-white border border-black/5 rounded-lg p-3">
+                                      <div className="bg-black/5 p-2 rounded-lg text-[var(--color-brand-primary)]">
+                                        <FileSpreadsheet size={16} />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold truncate">{b.title}</p>
+                                        <p className="text-[10px] font-mono opacity-50">{formatCurrency(b.finalPrice || 0)}</p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleBudgetSelect(b)}
+                                        aria-label={`Importar itens do orçamento ${b.title}`}
+                                        className="px-3 py-2 rounded-lg bg-[var(--color-brand-primary)] text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 hover:opacity-90 transition-all shrink-0"
+                                      >
+                                        <Plus size={13} /> Importar itens
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="text-[10px] opacity-40">
+                                  Importa os itens do orçamento (com BDI) para a etapa comercial da proposta.
+                                </p>
+                              </div>
                             )}
                           </div>
                         )}
