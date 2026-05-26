@@ -118,6 +118,7 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   const [newLocation, setNewLocation] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [maxStepReached, setMaxStepReached] = useState(1);
+  const [objectiveLoading, setObjectiveLoading] = useState(false);
   
   const [proposal, setProposal] = useState<Partial<Proposal>>({
     clientName: '',
@@ -329,6 +330,29 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
   };
 
   const [pricingInsight, setPricingInsight] = useState<string | null>(null);
+
+  const handleAiGenerateObjective = async () => {
+    const seed = (proposal.scopeTitle || aiPrompt || '').trim();
+    if (!seed) {
+      toast.info('Informe o título do escopo (Etapa 1) ou descreva o projeto abaixo.');
+      return;
+    }
+    setObjectiveLoading(true);
+    try {
+      const text = await aiService.generateScopeSummary(
+        `Projeto/escopo: ${seed}. Cliente: ${proposal.clientName || 'não informado'}.`
+      );
+      if (text) {
+        updateTechnical('generalConsiderations', text);
+        setIsDirty(true);
+        toast.success('Objeto e Escopo gerado.');
+      } else {
+        toast.error('Não foi possível gerar o texto agora.');
+      }
+    } finally {
+      setObjectiveLoading(false);
+    }
+  };
 
   const handleAiGenerateText = async (prompt: string) => {
     if (!prompt.trim()) return;
@@ -939,12 +963,36 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                        exit={{ opacity: 0, x: -20 }}
                        className="space-y-8 flex-1"
                     >
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold uppercase tracking-widest opacity-40">Objeto e Escopo (texto de abertura)</label>
+                          <button
+                            type="button"
+                            onClick={handleAiGenerateObjective}
+                            disabled={objectiveLoading}
+                            className="flex items-center gap-1.5 text-xs font-bold text-[var(--color-brand-primary)] disabled:opacity-40"
+                          >
+                            <Sparkles size={12} /> {objectiveLoading ? 'Gerando...' : 'Gerar com IA'}
+                          </button>
+                        </div>
+                        <textarea
+                          value={proposal.technicalScope?.generalConsiderations || ''}
+                          onChange={e => updateTechnical('generalConsiderations', e.target.value)}
+                          rows={4}
+                          placeholder="Ex: Fornecimento de material e mão de obra para instalação do sistema de proteção e combate a incêndio, contemplando detecção, alarme e os subsistemas previstos em projeto..."
+                          className="w-full p-4 rounded-xl bg-black/5 border-transparent focus:ring-1 focus:ring-[var(--color-brand-primary)] text-sm leading-relaxed"
+                        />
+                        <p className="text-[10px] opacity-50 italic">
+                          Parágrafo de abertura "Objeto e Escopo" da proposta. Se ficar vazio, um texto padrão é usado no PDF/Word.
+                        </p>
+                      </div>
+
                       <div className="bg-[var(--color-brand-dark)] text-white p-6 rounded-2xl space-y-4">
                         <div className="flex items-center gap-2">
                           <Sparkles size={18} className="text-[var(--color-brand-primary)]" />
                           <span className="text-xs font-bold uppercase tracking-widest">IA Assistente de Engenharia</span>
                         </div>
-                        <p className="text-sm opacity-70">Descreva o projeto para gerar o escopo formal.</p>
+                        <p className="text-sm opacity-70">Descreva o projeto para gerar os <strong>itens</strong> do escopo formal.</p>
                         <div className="flex gap-2">
                           <input 
                             type="text" 
@@ -1024,6 +1072,11 @@ export function ProposalWizard({ proposalId, onComplete }: WizardProps) {
                                />
                             </div>
                           ))}
+                          {(proposal.technicalScope?.items?.length ?? 0) === 0 && (
+                            <div className="text-center py-8 text-xs opacity-40 italic border border-dashed border-black/10 rounded-xl">
+                              Nenhum item de escopo ainda. Use a IA acima (ou os atalhos) ou "Adicionar Manualmente".
+                            </div>
+                          )}
                         </div>
                       </div>
 
