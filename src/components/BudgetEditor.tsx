@@ -291,11 +291,14 @@ export function BudgetEditor({ project: initial, onBack, onNavigate }: Props) {
         bdi: { ...project.bdi, calculatedBDI: calculatedBDIPct },
       });
 
-      const now = new Date().toISOString();
+      // Fator de markup: distribui indiretos + BDI proporcionalmente sobre os
+      // itens, de modo que a soma das linhas seja igual ao finalPrice (sem expor
+      // o custo direto ao cliente nem divergir do total exibido).
+      const markup = totalDirectCost > 0 ? finalPrice / totalDirectCost : 1;
       const newId = await proposalService.createProposal({
         clientName: project.clientName,
-        proposalNumber: `ORC-${Date.now()}`,
-        revision: '0',
+        proposalNumber: `PF-${new Date().getFullYear()}-${crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4)}`,
+        revision: '00',
         status: ProposalStatus.DRAFT,
         validityDays: 30,
         deadline: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
@@ -321,8 +324,8 @@ export function BudgetEditor({ project: initial, onBack, onNavigate }: Props) {
               description: i.description,
               quantity: i.quantity,
               unit: i.unit,
-              unitPrice: i.unitCost,
-              totalPrice: i.totalCost,
+              unitPrice: i.unitCost * markup,
+              totalPrice: i.totalCost * markup,
               source: 'engineering' as const,
             }))
           ),

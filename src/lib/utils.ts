@@ -12,6 +12,25 @@ export function formatCurrency(value: number) {
   }).format(value);
 }
 
+/**
+ * Valor de um item no contrato inteiro: itens mensais multiplicam o total
+ * pelo nº de meses; itens de valor único usam o total como está.
+ */
+export function itemContractValue(item: {
+  totalPrice?: number;
+  billingType?: 'once' | 'monthly' | string;
+  contractMonths?: number;
+}): number {
+  const base = item.totalPrice || 0;
+  if (item.billingType === 'monthly') return base * (item.contractMonths || 1);
+  return base;
+}
+
+/** Soma do valor de contrato de todos os itens (recorrentes × meses + únicos). */
+export function proposalItemsTotal(items: Array<Parameters<typeof itemContractValue>[0]>): number {
+  return (items || []).reduce((acc, it) => acc + itemContractValue(it), 0);
+}
+
 export function formatDate(dateInput: string | Date | null | undefined): string {
   if (!dateInput) return 'N/A';
   const date = dateInput instanceof Date ? dateInput : new Date(dateInput);

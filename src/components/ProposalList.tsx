@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Download,
   History,
+  Copy,
   Send,
   Plus,
   X,
@@ -48,6 +49,7 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   const [lossReason, setLossReason] = useState('');
   const [activeTab, setActiveTab] = useState<Record<string, 'overview' | 'technical' | 'commercial' | 'history'>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const setProposalTab = (id: string, tab: 'overview' | 'technical' | 'commercial' | 'history') => {
     setActiveTab(prev => ({ ...prev, [id]: tab }));
@@ -55,11 +57,28 @@ export function ProposalList({ onEdit }: ProposalListProps) {
 
   useEffect(() => {
     async function load() {
-      const data = await proposalService.getAllProposals();
-      setProposals(data);
+      try {
+        const data = await proposalService.getAllProposals();
+        setProposals(data);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
+
+  // Fecha o menu de ações ao clicar fora ou pressionar Esc.
+  useEffect(() => {
+    if (!activeActionsMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setActiveActionsMenu(null); };
+    const onClick = () => setActiveActionsMenu(null);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('click', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('click', onClick);
+    };
+  }, [activeActionsMenu]);
 
   const filteredProposals = proposals.filter(p => {
     const searchTerm = filter.toLowerCase();
@@ -144,6 +163,34 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     } catch (e) {
       console.error(e);
       toast.error('Erro ao duplicar proposta.');
+    }
+  };
+
+  const handleCloneProposal = async (p: Proposal) => {
+    // Clonagem total: nova proposta (novo número, revisão 00) reaproveitando
+    // toda a estrutura. Diferente de "Gerar Nova Revisão" (mesma proposta).
+    const { id, createdAt, updatedAt, ...rest } = p;
+    const newProposal: Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'> = {
+      ...rest,
+      proposalNumber: `PF-${new Date().getFullYear()}-${crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4)}`,
+      revision: '00',
+      status: ProposalStatus.DRAFT,
+      scopeTitle: rest.scopeTitle ? `${rest.scopeTitle} (Cópia)` : rest.scopeTitle,
+      revisions: [],
+      interactions: [],
+      lossReason: undefined,
+      followUpDate: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    };
+    try {
+      const newId = await proposalService.createProposal(newProposal);
+      const created = await proposalService.getProposal(newId);
+      if (created) setProposals([created, ...proposals]);
+      setActiveActionsMenu(null);
+      toast.success('Proposta clonada! Abrindo para edição…');
+      onEdit(newId);
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao clonar proposta.');
     }
   };
 
@@ -274,7 +321,9 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                   </td>
                   <td className="px-8 py-5 text-right relative">
                     <div className="flex items-center justify-end gap-2">
-                       <button 
+                       <button
+                        aria-label="Ações da proposta"
+                        aria-haspopup="true"
                         onClick={(e) => { e.stopPropagation(); setActiveActionsMenu(activeActionsMenu === p.id ? null : p.id) }}
                         className="p-2 hover:bg-black/5 rounded-lg text-black/60 transition-all"
                        >
@@ -291,6 +340,9 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             </button>
                             <button onClick={() => handleDuplicateWithRevision(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <History size={14} className="opacity-40" /> Gerar Nova Revisão
+                            </button>
+                            <button onClick={() => handleCloneProposal(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                              <Copy size={14} className="opacity-40" /> Clonar Proposta
                             </button>
                             <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/proposal/${p.id}`).then(() => toast.success('Link copiado!')); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <ExternalLink size={14} className="opacity-40" /> Copiar Link Público
@@ -597,7 +649,13 @@ export function ProposalList({ onEdit }: ProposalListProps) {
           </tbody>
         </table>
         
-        {filteredProposals.length === 0 && (
+        {loading ? (
+          <div className="p-8 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-14 bg-black/5 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : filteredProposals.length === 0 && (
           <div className="p-20 text-center space-y-4">
              <div className="mx-auto w-16 h-16 bg-black/5 rounded-full flex items-center justify-center opacity-40">
                <Search size={32} />

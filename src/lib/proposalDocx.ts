@@ -37,9 +37,18 @@ import {
   ImageRun,
   PageNumber,
 } from 'docx';
-import { Proposal } from '../types';
-import { formatCurrency } from './utils';
+import { Proposal, TechnicalScope, CommercialProposal } from '../types';
+import { formatCurrency, itemContractValue } from './utils';
 import { PROFEM_LOGO_PNG_BASE64 } from './profemLogo';
+
+// ── Fallbacks para propostas com escopo/comercial nulos vindos do banco ──────
+const EMPTY_SCOPE: TechnicalScope = {
+  generalConsiderations: '', references: [], norms: [], items: [],
+  safetyNotes: '', exclusions: [], contractorObligations: [], contracteeObligations: [],
+};
+const EMPTY_COMMERCIAL: CommercialProposal = {
+  totalValue: 0, paymentTerms: '', reajuste: '', guarantee: '', items: [],
+};
 
 // ── Sistema de cor (espelha :root do HTML) ───────────────────────────────────
 const BRAND = 'E2611A';
@@ -139,7 +148,7 @@ function sans(
     text,
     font: SANS,
     color: opts.color ?? INK2,
-    size: opts.size ?? 19,
+    size: opts.size ?? 22,
     bold: opts.bold ?? false,
     italics: opts.italics ?? false,
   });
@@ -155,7 +164,7 @@ function lead(text: string, opts: { after?: number } = {}) {
   return new Paragraph({
     alignment: AlignmentType.JUSTIFIED,
     spacing: { after: opts.after ?? 140, line: 264 },
-    children: [sans(text, { size: 18 })],
+    children: [sans(text, { size: 22 })],
   });
 }
 
@@ -191,8 +200,8 @@ function hSec(num: string, title: string) {
     border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE, space: 4 } },
     children: [
       bar(),
-      new TextRun({ text: '  ' + num + '  ', font: MONO, color: BRAND, bold: true, size: 17, characterSpacing: 18 }),
-      new TextRun({ text: title, font: SANS, bold: true, size: 21, color: INK }),
+      new TextRun({ text: '  ' + num + '  ', font: MONO, color: BRAND, bold: true, size: 18, characterSpacing: 18 }),
+      new TextRun({ text: title, font: SANS, bold: true, size: 26, color: INK }),
     ],
   });
 }
@@ -200,7 +209,7 @@ function hSec(num: string, title: string) {
 function hSub(title: string) {
   return new Paragraph({
     spacing: { before: 180, after: 80 },
-    children: [bar(), new TextRun({ text: '  ' + title, font: SANS, bold: true, size: 19, color: INK2 })],
+    children: [bar(), new TextRun({ text: '  ' + title, font: SANS, bold: true, size: 24, color: INK2 })],
   });
 }
 
@@ -208,8 +217,27 @@ function listItem(text: string) {
   return new Paragraph({
     spacing: { after: 50, line: 252 },
     indent: { left: 260, hanging: 160 },
-    children: [new TextRun({ text: '•  ', color: BRAND, bold: true, size: 17 }), sans(text, { size: 17 })],
+    children: [new TextRun({ text: '•  ', color: BRAND, bold: true, size: 22 }), sans(text, { size: 22 })],
   });
+}
+
+/**
+ * Renderiza um item de escopo no padrão do anexo: a categoria vira um título
+ * em negrito (ex.: "Bomba Jockey:") e cada linha da descrição vira um item de
+ * lista — para leitura fácil de quem lê a proposta. Sem categoria, lista direto.
+ */
+function scopeItemBlock(category?: string, description?: string): Paragraph[] {
+  const cat = (category || '').trim();
+  const lines = (description || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const out: Paragraph[] = [];
+  if (cat) {
+    out.push(new Paragraph({
+      spacing: { before: 100, after: 30 },
+      children: [new TextRun({ text: cat.endsWith(':') ? cat : `${cat}:`, font: SANS, bold: true, size: 22, color: INK })],
+    }));
+  }
+  lines.forEach(l => out.push(listItem(l)));
+  return out;
 }
 
 // ── Tabela chave/valor ────────────────────────────────────────────────────────
@@ -226,12 +254,12 @@ function kvTable(rows: [string, string][]) {
             new TableCell({
               width: { size: 40, type: WidthType.PERCENTAGE },
               margins: { top: 70, bottom: 70, left: 0, right: 120 },
-              children: [new Paragraph({ children: [sans(k, { color: MUTED, size: 17 })] })],
+              children: [new Paragraph({ children: [sans(k, { color: MUTED, size: 22 })] })],
             }),
             new TableCell({
               width: { size: 60, type: WidthType.PERCENTAGE },
               margins: { top: 70, bottom: 70, left: 0, right: 0 },
-              children: [new Paragraph({ children: [sans(v, { color: INK, bold: true, size: 17 })] })],
+              children: [new Paragraph({ children: [sans(v, { color: INK, bold: true, size: 22 })] })],
             }),
           ],
         }),
@@ -245,7 +273,7 @@ function normsTable(norms: [string, string][]) {
     new TableCell({
       shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
       margins: { top: 70, bottom: 70, left: 140, right: 140 },
-      children: [new Paragraph({ children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 15, characterSpacing: 8 })] })],
+      children: [new Paragraph({ children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
     });
 
   return new Table({
@@ -265,12 +293,12 @@ function normsTable(norms: [string, string][]) {
               new TableCell({
                 shading: i % 2 ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
                 margins: { top: 65, bottom: 65, left: 140, right: 140 },
-                children: [new Paragraph({ children: [mono(code, { color: INK2, size: 16 })] })],
+                children: [new Paragraph({ children: [mono(code, { color: INK2, size: 22 })] })],
               }),
               new TableCell({
                 shading: i % 2 ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
                 margins: { top: 65, bottom: 65, left: 140, right: 140 },
-                children: [new Paragraph({ children: [sans(app, { color: INK2, size: 17 })] })],
+                children: [new Paragraph({ children: [sans(app, { color: INK2, size: 22 })] })],
               }),
             ],
           }),
@@ -283,14 +311,13 @@ function normsTable(norms: [string, string][]) {
 type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
 
 function valuesTable(proposal: Proposal) {
-  const com = proposal.commercialProposal;
-  const items = com.items || [];
+  const items = proposal.commercialProposal?.items || [];
 
   const th = (text: string, align: Align) =>
     new TableCell({
       shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
       margins: { top: 65, bottom: 65, left: 140, right: 140 },
-      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 15, characterSpacing: 8 })] })],
+      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
     });
 
   const td = (text: string, align: Align, opts: { mono?: boolean; bold?: boolean; zebra?: boolean } = {}) =>
@@ -301,7 +328,7 @@ function valuesTable(proposal: Proposal) {
       children: [
         new Paragraph({
           alignment: align,
-          children: [opts.mono ? mono(text, { color: INK2, size: 16, bold: opts.bold }) : sans(text, { color: INK2, size: 17, bold: opts.bold })],
+          children: [opts.mono ? mono(text, { color: INK2, size: 22, bold: opts.bold }) : sans(text, { color: INK2, size: 22, bold: opts.bold })],
         }),
       ],
     });
@@ -322,14 +349,17 @@ function valuesTable(proposal: Proposal) {
   if (items.length > 0) {
     items.forEach((it, i) => {
       const z = i % 2 === 1;
+      const monthly = it.billingType === 'monthly';
+      const desc = monthly ? `${it.description} — mensal × ${it.contractMonths || 12}` : it.description;
+      const unit = monthly ? `${formatCurrency(it.unitPrice)}/mês` : formatCurrency(it.unitPrice);
       rows.push(
         new TableRow({
           children: [
             td(String(i + 1).padStart(2, '0'), AlignmentType.LEFT, { mono: true, zebra: z }),
-            td(it.description, AlignmentType.LEFT, { zebra: z }),
+            td(desc, AlignmentType.LEFT, { zebra: z }),
             td(String(it.quantity), AlignmentType.CENTER, { mono: true, zebra: z }),
-            td(formatCurrency(it.unitPrice), AlignmentType.RIGHT, { mono: true, zebra: z }),
-            td(formatCurrency(it.totalPrice), AlignmentType.RIGHT, { mono: true, bold: true, zebra: z }),
+            td(unit, AlignmentType.RIGHT, { mono: true, zebra: z }),
+            td(formatCurrency(itemContractValue(it)), AlignmentType.RIGHT, { mono: true, bold: true, zebra: z }),
           ],
         }),
       );
@@ -354,6 +384,94 @@ function valuesTable(proposal: Proposal) {
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     columnWidths: [750, 5210, 1030, 1180, 1190],
+    layout: TableLayoutType.FIXED,
+    borders: { top: none, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none },
+    rows,
+  });
+}
+
+// ── Tabela de serviços sob demanda / chamados ───────────────────────────────────
+function onDemandTable(services: { description: string; unit: string; price: number }[]) {
+  const th = (text: string, align: Align) =>
+    new TableCell({
+      shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
+      margins: { top: 65, bottom: 65, left: 140, right: 140 },
+      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
+    });
+  const td = (text: string, align: Align, opts: { mono?: boolean; zebra?: boolean } = {}) =>
+    new TableCell({
+      shading: opts.zebra ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
+      margins: { top: 60, bottom: 60, left: 140, right: 140 },
+      verticalAlign: VerticalAlign.CENTER,
+      children: [new Paragraph({ alignment: align, children: [opts.mono ? mono(text, { color: INK2, size: 22 }) : sans(text, { color: INK2, size: 22 })] })],
+    });
+
+  const rows: TableRow[] = [
+    new TableRow({
+      tableHeader: true,
+      children: [th('Serviço', AlignmentType.LEFT), th('Unidade', AlignmentType.LEFT), th('Valor', AlignmentType.RIGHT)],
+    }),
+  ];
+  services.forEach((s, i) => {
+    const z = i % 2 === 1;
+    rows.push(
+      new TableRow({
+        children: [
+          td(s.description, AlignmentType.LEFT, { zebra: z }),
+          td(s.unit, AlignmentType.LEFT, { zebra: z }),
+          td(formatCurrency(s.price), AlignmentType.RIGHT, { mono: true, zebra: z }),
+        ],
+      }),
+    );
+  });
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [5800, 2360, 1200],
+    layout: TableLayoutType.FIXED,
+    borders: { top: none, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none },
+    rows,
+  });
+}
+
+// ── Matriz de periodicidade de manutenção ───────────────────────────────────────
+function maintenanceTable(tasks: { equipment: string; inspection: string; frequency: string }[]) {
+  const th = (text: string, align: Align) =>
+    new TableCell({
+      shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
+      margins: { top: 65, bottom: 65, left: 140, right: 140 },
+      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
+    });
+  const td = (text: string, align: Align, opts: { mono?: boolean; zebra?: boolean } = {}) =>
+    new TableCell({
+      shading: opts.zebra ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
+      margins: { top: 60, bottom: 60, left: 140, right: 140 },
+      verticalAlign: VerticalAlign.CENTER,
+      children: [new Paragraph({ alignment: align, children: [opts.mono ? mono(text, { color: INK2, size: 22 }) : sans(text, { color: INK2, size: 22 })] })],
+    });
+
+  const rows: TableRow[] = [
+    new TableRow({
+      tableHeader: true,
+      children: [th('Equipamento', AlignmentType.LEFT), th('Tipo de inspeção', AlignmentType.LEFT), th('Frequência', AlignmentType.LEFT)],
+    }),
+  ];
+  tasks.forEach((t, i) => {
+    const z = i % 2 === 1;
+    rows.push(
+      new TableRow({
+        children: [
+          td(t.equipment, AlignmentType.LEFT, { zebra: z }),
+          td(t.inspection, AlignmentType.LEFT, { zebra: z }),
+          td(t.frequency, AlignmentType.LEFT, { mono: true, zebra: z }),
+        ],
+      }),
+    );
+  });
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [3800, 4360, 1200],
     layout: TableLayoutType.FIXED,
     borders: { top: none, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none },
     rows,
@@ -403,7 +521,7 @@ function termsCard(cells: [string, string][]) {
               margins: { top: 120, bottom: 120, left: 150, right: 150 },
               children: [
                 new Paragraph({ spacing: { after: 60 }, children: [mono(k, { color: BRAND_DEEP, size: 13, caps: true })] }),
-                new Paragraph({ children: [sans(v, { color: INK2, size: 16 })] }),
+                new Paragraph({ children: [sans(v, { color: INK2, size: 22 })] }),
               ],
             }),
         ),
@@ -429,9 +547,9 @@ function warnCallout() {
               new Paragraph({ spacing: { after: 50 }, children: [mono('Itens não inclusos', { color: WARN, size: 13, bold: true, caps: true })] }),
               new Paragraph({
                 children: [
-                  sans('Plataformas elevatórias e andaimes para trabalhos em altura deverão ser fornecidos pela Contratante e ', { color: WARN_TEXT, size: 17 }),
-                  sans('não estão inclusos', { color: WARN, size: 17, bold: true }),
-                  sans(' no valor acima.', { color: WARN_TEXT, size: 17 }),
+                  sans('Plataformas elevatórias e andaimes para trabalhos em altura deverão ser fornecidos pela Contratante e ', { color: WARN_TEXT, size: 22 }),
+                  sans('não estão inclusos', { color: WARN, size: 22, bold: true }),
+                  sans(' no valor acima.', { color: WARN_TEXT, size: 22 }),
                 ],
               }),
             ],
@@ -467,12 +585,12 @@ function signBlock() {
       new TableRow({
         children: [
           cell([
-            { text: 'Marcus Paulo G. Lopes', bold: true, color: INK, size: 18 },
+            { text: 'Marcus Paulo G. Lopes', bold: true, color: INK, size: 22 },
             { text: 'Engº Civil · Profem Soluções Contra Incêndio', color: MUTED, size: 15 },
             { text: 'Assinatura digital verificada', mono: true, color: MUTED, size: 14 },
           ]),
           cell([
-            { text: 'Aceite do Cliente', bold: true, color: INK, size: 18 },
+            { text: 'Aceite do Cliente', bold: true, color: INK, size: 22 },
             { text: 'Responsável · [ Data ]', color: MUTED, size: 15 },
           ]),
         ],
@@ -664,8 +782,8 @@ function splitNorm(n: string): [string, string] {
 // GERADOR PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
 export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
-  const sc = proposal.technicalScope;
-  const com = proposal.commercialProposal;
+  const sc = proposal.technicalScope ?? EMPTY_SCOPE;
+  const com = proposal.commercialProposal ?? EMPTY_COMMERCIAL;
   const revFormatted = String(proposal.revision ?? '00').padStart(2, '0');
 
   const d = new Date();
@@ -700,16 +818,26 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
     ]),
   );
 
+  if (sc.locations?.length) {
+    children.push(hSub('Unidades / Locais de execução'));
+    sc.locations.forEach(l => children.push(listItem(l)));
+  }
+
   // 02 Objeto e Escopo
   children.push(hSec('02', 'Objeto e Escopo'));
   children.push(lead(sc.generalConsiderations?.trim() || DEFAULT_OBJETO));
   if (sc.items?.length) {
     children.push(hSub('Escopo de fornecimento'));
-    sc.items.forEach(it => children.push(listItem(it.category ? `${it.category} — ${it.description}` : it.description)));
+    sc.items.forEach(it => children.push(...scopeItemBlock(it.category, it.description)));
   }
   children.push(hSub('Normas técnicas de referência'));
   children.push(normsTable(norms));
   children.push(new Paragraph({ spacing: { before: 30, after: 0 }, children: [sans('As normas aplicáveis são confirmadas conforme o escopo final contratado.', { color: MUTED, size: 14, italics: true })] }));
+
+  if (sc.maintenancePlan?.length) {
+    children.push(hSub('Matriz de periodicidade'));
+    children.push(maintenanceTable(sc.maintenancePlan));
+  }
 
   // 03 Exclusões do Escopo
   children.push(hSec('03', 'Exclusões do Escopo'));
@@ -753,6 +881,13 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
   children.push(new Paragraph({ spacing: { before: 120, after: 0 }, children: [] }));
   children.push(warnCallout());
 
+  // Serviços sob demanda / chamados (não somam no total)
+  if (com.onDemandServices?.length) {
+    children.push(hSub('Serviços sob demanda'));
+    children.push(onDemandTable(com.onDemandServices));
+    children.push(new Paragraph({ spacing: { before: 30, after: 0 }, children: [sans('Valores cobrados por evento/acionamento — não inclusos no investimento total.', { color: MUTED, size: 14, italics: true })] }));
+  }
+
   // 06 Condições Comerciais
   children.push(hSec('06', 'Condições Comerciais'));
   children.push(
@@ -785,7 +920,7 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
   const doc = new Document({
     creator: 'ProFem Soluções Contra Incêndio',
     title: `Proposta ${proposal.proposalNumber}`,
-    styles: { default: { document: { run: { font: SANS, size: 19, color: INK2 } } } },
+    styles: { default: { document: { run: { font: SANS, size: 22, color: INK2 } } } },
     sections: [
       {
         properties: {

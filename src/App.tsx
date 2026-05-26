@@ -14,6 +14,7 @@ import { ProposalWizard } from './components/ProposalWizard';
 import { BudgetManager } from './components/BudgetManager';
 import { NormsManager } from './components/NormsManager';
 import { PublicProposalView } from './components/PublicProposalView';
+import { ProposalPrintRoute } from './components/ProposalPremiumView';
 import { ManualProposalModal } from './components/ManualProposalModal';
 import { DailyBriefing } from './components/DailyBriefing';
 import { Reports } from './components/Reports';
@@ -25,9 +26,14 @@ import { Logo } from './components/Logo';
 
 function AppContent() {
   const { user, loading, signIn } = useAuth();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === 'undefined') return 'dashboard';
+    if (window.location.pathname.startsWith('/proposal/')) return 'dashboard';
+    return window.location.hash.replace(/^#/, '') || 'dashboard';
+  });
   const [isPublic, setIsPublic] = useState(false);
   const [publicId, setPublicId] = useState('');
+  const [printMode, setPrintMode] = useState(false);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [showRadar, setShowRadar] = useState(false);
 
@@ -36,16 +42,38 @@ function AppContent() {
     if (path.startsWith('/proposal/')) {
       setIsPublic(true);
       setPublicId(path.replace('/proposal/', ''));
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('print') === '1') setPrintMode(true);
     }
   }, []);
+
+  // Sincroniza a aba ativa com o hash da URL: permite atualizar a página,
+  // usar voltar/avançar do navegador e compartilhar links de telas internas.
+  useEffect(() => {
+    if (window.location.pathname.startsWith('/proposal/')) return;
+    const onHashChange = () => {
+      setActiveTab(window.location.hash.replace(/^#/, '') || 'dashboard');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (window.location.pathname.startsWith('/proposal/')) return;
+    const target = `#${activeTab}`;
+    if (window.location.hash !== target) {
+      window.history.pushState(null, '', target);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (user) {
       proposalService.getAllProposals().then(setProposals);
       
+      const disabled = localStorage.getItem('radarDisabled') === '1';
       const lastRadar = localStorage.getItem('lastRadarShow');
       const today = new Date().toDateString();
-      if (lastRadar !== today) {
+      if (!disabled && lastRadar !== today) {
         setShowRadar(true);
         localStorage.setItem('lastRadarShow', today);
       }
@@ -53,7 +81,9 @@ function AppContent() {
   }, [user]);
 
   if (isPublic) {
-    return <PublicProposalView id={publicId} />;
+    return printMode
+      ? <ProposalPrintRoute id={publicId} />
+      : <PublicProposalView id={publicId} />;
   }
 
   if (loading) {

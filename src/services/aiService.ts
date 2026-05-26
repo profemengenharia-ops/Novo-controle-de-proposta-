@@ -86,6 +86,24 @@ export const aiService = {
     return safeParseJSON<TechnicalScopeItem[]>(result, []);
   },
 
+  async generateScopeSummary(prompt: string): Promise<string> {
+    const result = await callAIWithRetry(async () => {
+      const response = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+        config: {
+          systemInstruction: `Você é um engenheiro especialista em sistemas de combate a incêndio.
+          Escreva o parágrafo de "Objeto e Escopo" para uma proposta técnica formal, em português brasileiro.
+          Regras: um único parágrafo corrido (3 a 5 frases), tom profissional e técnico, sem listas, sem títulos,
+          sem markdown. Descreva o objeto do fornecimento/serviço de forma concisa e objetiva.`,
+        }
+      });
+      return response.text;
+    }, "Gerar Objeto e Escopo");
+
+    return (result || '').trim();
+  },
+
   async extractQuantities(text: string): Promise<any> {
     const result = await callAIWithRetry(async () => {
       const response = await ai.models.generateContent({
