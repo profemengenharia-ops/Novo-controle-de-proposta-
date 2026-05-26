@@ -37,9 +37,18 @@ import {
   ImageRun,
   PageNumber,
 } from 'docx';
-import { Proposal } from '../types';
-import { formatCurrency } from './utils';
+import { Proposal, TechnicalScope, CommercialProposal } from '../types';
+import { formatCurrency, itemContractValue } from './utils';
 import { PROFEM_LOGO_PNG_BASE64 } from './profemLogo';
+
+// ── Fallbacks para propostas com escopo/comercial nulos vindos do banco ──────
+const EMPTY_SCOPE: TechnicalScope = {
+  generalConsiderations: '', references: [], norms: [], items: [],
+  safetyNotes: '', exclusions: [], contractorObligations: [], contracteeObligations: [],
+};
+const EMPTY_COMMERCIAL: CommercialProposal = {
+  totalValue: 0, paymentTerms: '', reajuste: '', guarantee: '', items: [],
+};
 
 // ── Sistema de cor (espelha :root do HTML) ───────────────────────────────────
 const BRAND = 'E2611A';
@@ -283,8 +292,7 @@ function normsTable(norms: [string, string][]) {
 type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
 
 function valuesTable(proposal: Proposal) {
-  const com = proposal.commercialProposal;
-  const items = com.items || [];
+  const items = proposal.commercialProposal?.items || [];
 
   const th = (text: string, align: Align) =>
     new TableCell({
@@ -322,14 +330,17 @@ function valuesTable(proposal: Proposal) {
   if (items.length > 0) {
     items.forEach((it, i) => {
       const z = i % 2 === 1;
+      const monthly = it.billingType === 'monthly';
+      const desc = monthly ? `${it.description} — mensal × ${it.contractMonths || 12}` : it.description;
+      const unit = monthly ? `${formatCurrency(it.unitPrice)}/mês` : formatCurrency(it.unitPrice);
       rows.push(
         new TableRow({
           children: [
             td(String(i + 1).padStart(2, '0'), AlignmentType.LEFT, { mono: true, zebra: z }),
-            td(it.description, AlignmentType.LEFT, { zebra: z }),
+            td(desc, AlignmentType.LEFT, { zebra: z }),
             td(String(it.quantity), AlignmentType.CENTER, { mono: true, zebra: z }),
-            td(formatCurrency(it.unitPrice), AlignmentType.RIGHT, { mono: true, zebra: z }),
-            td(formatCurrency(it.totalPrice), AlignmentType.RIGHT, { mono: true, bold: true, zebra: z }),
+            td(unit, AlignmentType.RIGHT, { mono: true, zebra: z }),
+            td(formatCurrency(itemContractValue(it)), AlignmentType.RIGHT, { mono: true, bold: true, zebra: z }),
           ],
         }),
       );
@@ -354,6 +365,94 @@ function valuesTable(proposal: Proposal) {
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     columnWidths: [750, 5210, 1030, 1180, 1190],
+    layout: TableLayoutType.FIXED,
+    borders: { top: none, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none },
+    rows,
+  });
+}
+
+// ── Tabela de serviços sob demanda / chamados ───────────────────────────────────
+function onDemandTable(services: { description: string; unit: string; price: number }[]) {
+  const th = (text: string, align: Align) =>
+    new TableCell({
+      shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
+      margins: { top: 65, bottom: 65, left: 140, right: 140 },
+      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
+    });
+  const td = (text: string, align: Align, opts: { mono?: boolean; zebra?: boolean } = {}) =>
+    new TableCell({
+      shading: opts.zebra ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
+      margins: { top: 60, bottom: 60, left: 140, right: 140 },
+      verticalAlign: VerticalAlign.CENTER,
+      children: [new Paragraph({ alignment: align, children: [opts.mono ? mono(text, { color: INK2, size: 22 }) : sans(text, { color: INK2, size: 22 })] })],
+    });
+
+  const rows: TableRow[] = [
+    new TableRow({
+      tableHeader: true,
+      children: [th('Serviço', AlignmentType.LEFT), th('Unidade', AlignmentType.LEFT), th('Valor', AlignmentType.RIGHT)],
+    }),
+  ];
+  services.forEach((s, i) => {
+    const z = i % 2 === 1;
+    rows.push(
+      new TableRow({
+        children: [
+          td(s.description, AlignmentType.LEFT, { zebra: z }),
+          td(s.unit, AlignmentType.LEFT, { zebra: z }),
+          td(formatCurrency(s.price), AlignmentType.RIGHT, { mono: true, zebra: z }),
+        ],
+      }),
+    );
+  });
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [5800, 2360, 1200],
+    layout: TableLayoutType.FIXED,
+    borders: { top: none, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none },
+    rows,
+  });
+}
+
+// ── Matriz de periodicidade de manutenção ───────────────────────────────────────
+function maintenanceTable(tasks: { equipment: string; inspection: string; frequency: string }[]) {
+  const th = (text: string, align: Align) =>
+    new TableCell({
+      shading: { type: ShadingType.CLEAR, fill: BRAND, color: 'auto' },
+      margins: { top: 65, bottom: 65, left: 140, right: 140 },
+      children: [new Paragraph({ alignment: align, children: [new TextRun({ text: text.toUpperCase(), font: SANS, bold: true, color: WHITE, size: 18, characterSpacing: 8 })] })],
+    });
+  const td = (text: string, align: Align, opts: { mono?: boolean; zebra?: boolean } = {}) =>
+    new TableCell({
+      shading: opts.zebra ? { type: ShadingType.CLEAR, fill: PAPER2, color: 'auto' } : undefined,
+      margins: { top: 60, bottom: 60, left: 140, right: 140 },
+      verticalAlign: VerticalAlign.CENTER,
+      children: [new Paragraph({ alignment: align, children: [opts.mono ? mono(text, { color: INK2, size: 22 }) : sans(text, { color: INK2, size: 22 })] })],
+    });
+
+  const rows: TableRow[] = [
+    new TableRow({
+      tableHeader: true,
+      children: [th('Equipamento', AlignmentType.LEFT), th('Tipo de inspeção', AlignmentType.LEFT), th('Frequência', AlignmentType.LEFT)],
+    }),
+  ];
+  tasks.forEach((t, i) => {
+    const z = i % 2 === 1;
+    rows.push(
+      new TableRow({
+        children: [
+          td(t.equipment, AlignmentType.LEFT, { zebra: z }),
+          td(t.inspection, AlignmentType.LEFT, { zebra: z }),
+          td(t.frequency, AlignmentType.LEFT, { mono: true, zebra: z }),
+        ],
+      }),
+    );
+  });
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [3800, 4360, 1200],
     layout: TableLayoutType.FIXED,
     borders: { top: none, bottom: line, left: none, right: none, insideHorizontal: line, insideVertical: none },
     rows,
@@ -664,8 +763,8 @@ function splitNorm(n: string): [string, string] {
 // GERADOR PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
 export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
-  const sc = proposal.technicalScope;
-  const com = proposal.commercialProposal;
+  const sc = proposal.technicalScope ?? EMPTY_SCOPE;
+  const com = proposal.commercialProposal ?? EMPTY_COMMERCIAL;
   const revFormatted = String(proposal.revision ?? '00').padStart(2, '0');
 
   const d = new Date();
@@ -700,6 +799,11 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
     ]),
   );
 
+  if (sc.locations?.length) {
+    children.push(hSub('Unidades / Locais de execução'));
+    sc.locations.forEach(l => children.push(listItem(l)));
+  }
+
   // 02 Objeto e Escopo
   children.push(hSec('02', 'Objeto e Escopo'));
   children.push(lead(sc.generalConsiderations?.trim() || DEFAULT_OBJETO));
@@ -710,6 +814,11 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
   children.push(hSub('Normas técnicas de referência'));
   children.push(normsTable(norms));
   children.push(new Paragraph({ spacing: { before: 30, after: 0 }, children: [sans('As normas aplicáveis são confirmadas conforme o escopo final contratado.', { color: MUTED, size: 14, italics: true })] }));
+
+  if (sc.maintenancePlan?.length) {
+    children.push(hSub('Matriz de periodicidade'));
+    children.push(maintenanceTable(sc.maintenancePlan));
+  }
 
   // 03 Exclusões do Escopo
   children.push(hSec('03', 'Exclusões do Escopo'));
@@ -752,6 +861,13 @@ export async function generateProposalDocx(proposal: Proposal): Promise<Blob> {
   children.push(totalBar(com.totalValue || 0));
   children.push(new Paragraph({ spacing: { before: 120, after: 0 }, children: [] }));
   children.push(warnCallout());
+
+  // Serviços sob demanda / chamados (não somam no total)
+  if (com.onDemandServices?.length) {
+    children.push(hSub('Serviços sob demanda'));
+    children.push(onDemandTable(com.onDemandServices));
+    children.push(new Paragraph({ spacing: { before: 30, after: 0 }, children: [sans('Valores cobrados por evento/acionamento — não inclusos no investimento total.', { color: MUTED, size: 14, italics: true })] }));
+  }
 
   // 06 Condições Comerciais
   children.push(hSec('06', 'Condições Comerciais'));

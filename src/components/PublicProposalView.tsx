@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Proposal, ProposalStatus } from '../types';
 import { proposalService } from '../services/proposalService';
-import { formatDate, formatCurrency, cn } from '../lib/utils';
+import { formatDate, formatCurrency, cn, itemContractValue, proposalItemsTotal } from '../lib/utils';
 import {
   CheckCircle2,
   Clock,
@@ -90,7 +90,10 @@ export function PublicProposalView({ id }: PublicViewProps) {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Ref: {proposal.proposalNumber}</span>
-          <button className="flex items-center gap-2 text-xs font-bold bg-neutral-100 px-4 py-2 rounded-lg hover:bg-neutral-200 transition-colors">
+          <button
+            onClick={() => window.open(`/proposal/${id}?print=1`, '_blank')}
+            className="flex items-center gap-2 text-xs font-bold bg-neutral-100 px-4 py-2 rounded-lg hover:bg-neutral-200 transition-colors"
+          >
             <Download size={14} /> PDF
           </button>
         </div>
@@ -191,8 +194,8 @@ export function PublicProposalView({ id }: PublicViewProps) {
                  <div className="space-y-1">
                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">Investimento Total</p>
                    <h3 className="text-5xl font-bold tracking-tighter">
-                     {formatCurrency(proposal.commercialProposal?.items && proposal.commercialProposal.items.length > 0 
-                      ? proposal.commercialProposal.items.reduce((acc, item) => acc + (item.totalPrice || 0), 0)
+                     {formatCurrency(proposal.commercialProposal?.items && proposal.commercialProposal.items.length > 0
+                      ? proposalItemsTotal(proposal.commercialProposal.items)
                       : (proposal.commercialProposal?.totalValue || 0))}
                    </h3>
                  </div>
@@ -202,7 +205,7 @@ export function PublicProposalView({ id }: PublicViewProps) {
                  </div>
               </div>
 
-              {proposal.commercialProposal.items?.length > 0 && (
+              {(proposal.commercialProposal?.items?.length ?? 0) > 0 && (
                 <div className="px-12 py-8 border-b border-neutral-100">
                   <table className="w-full text-left text-sm">
                     <thead>
@@ -215,13 +218,41 @@ export function PublicProposalView({ id }: PublicViewProps) {
                     <tbody className="divide-y divide-neutral-50">
                       {proposal.commercialProposal.items.map((item, i) => (
                         <tr key={i}>
-                          <td className="py-4 font-medium text-neutral-700">{item.description}</td>
+                          <td className="py-4 font-medium text-neutral-700">
+                            {item.description}
+                            {item.billingType === 'monthly' && (
+                              <span className="block text-[10px] font-bold uppercase tracking-wider text-orange-500">Mensal × {item.contractMonths || 12} meses</span>
+                            )}
+                          </td>
                           <td className="py-4 text-center text-neutral-500">{item.quantity} {item.unit}</td>
-                          <td className="py-4 text-right font-bold text-neutral-900">{formatCurrency(item.totalPrice)}</td>
+                          <td className="py-4 text-right font-bold text-neutral-900">
+                            {formatCurrency(itemContractValue(item))}
+                            {item.billingType === 'monthly' && (
+                              <span className="block text-[10px] font-normal text-neutral-400">{formatCurrency(item.totalPrice)}/mês</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {(proposal.commercialProposal?.onDemandServices?.length ?? 0) > 0 && (
+                <div className="px-12 py-8 border-b border-neutral-100">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-400 mb-4">Serviços sob Demanda</h3>
+                  <table className="w-full text-left text-sm">
+                    <tbody className="divide-y divide-neutral-50">
+                      {proposal.commercialProposal!.onDemandServices!.map((s, i) => (
+                        <tr key={i}>
+                          <td className="py-3 font-medium text-neutral-700">{s.description}</td>
+                          <td className="py-3 text-center text-neutral-500">{s.unit}</td>
+                          <td className="py-3 text-right font-bold text-neutral-900">{formatCurrency(s.price)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-[10px] text-neutral-400 italic mt-3">Valores cobrados por evento/acionamento — não inclusos no investimento total.</p>
                 </div>
               )}
 

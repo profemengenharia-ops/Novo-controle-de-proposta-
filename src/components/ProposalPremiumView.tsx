@@ -9,15 +9,27 @@
  * Usa estilos inline (fidelidade na impressão) e react-to-print.
  */
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { Printer } from 'lucide-react';
-import { Proposal } from '../types';
-import { formatCurrency } from '../lib/utils';
+import { Printer, AlertCircle } from 'lucide-react';
+import { Proposal, TechnicalScope, CommercialProposal } from '../types';
+import { formatCurrency, itemContractValue } from '../lib/utils';
 import { PROFEM_LOGO_PNG_BASE64 } from '../lib/profemLogo';
+import { proposalService } from '../services/proposalService';
+
+// ── Fallbacks p/ propostas com escopo/comercial nulos vindos do banco ────────
+const EMPTY_SCOPE: TechnicalScope = {
+  generalConsiderations: '', references: [], norms: [], items: [],
+  safetyNotes: '', exclusions: [], contractorObligations: [], contracteeObligations: [],
+};
+const EMPTY_COMMERCIAL: CommercialProposal = {
+  totalValue: 0, paymentTerms: '', reajuste: '', guarantee: '', items: [],
+};
 
 interface Props {
   proposal: Proposal;
+  /** Dispara o diálogo de impressão automaticamente ao montar (usado em /proposal/:id?print=1). */
+  autoPrint?: boolean;
 }
 
 // ── Paleta (idêntica ao :root do template HTML) ──────────────────────────────
@@ -165,7 +177,7 @@ const leadStyle: React.CSSProperties = { fontSize: '11pt', color: C.ink2, margin
 const ulStyle: React.CSSProperties = { fontSize: '11pt', color: C.ink2, paddingLeft: 18, margin: '4px 0 10px', lineHeight: 1.55 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-export function ProposalPremiumView({ proposal }: Props) {
+export function ProposalPremiumView({ proposal, autoPrint = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
     contentRef: ref,
@@ -173,8 +185,18 @@ export function ProposalPremiumView({ proposal }: Props) {
     pageStyle: PAGE_STYLE,
   });
 
-  const sc = proposal.technicalScope;
-  const com = proposal.commercialProposal;
+  // Em modo impressão (Baixar PDF) abre o diálogo uma única vez, após o
+  // layout/fontes assentarem — sem isso o react-to-print captura o DOM cru.
+  const printedRef = useRef(false);
+  useEffect(() => {
+    if (!autoPrint || printedRef.current) return;
+    printedRef.current = true;
+    const t = setTimeout(() => handlePrint(), 650);
+    return () => clearTimeout(t);
+  }, [autoPrint, handlePrint]);
+
+  const sc = proposal.technicalScope ?? EMPTY_SCOPE;
+  const com = proposal.commercialProposal ?? EMPTY_COMMERCIAL;
   const rev = String(proposal.revision ?? '00').padStart(2, '0');
   const d = new Date();
   const dateLong = `${String(d.getDate()).padStart(2, '0')} de ${MES[d.getMonth()]} de ${d.getFullYear()}`;
@@ -275,6 +297,13 @@ export function ProposalPremiumView({ proposal }: Props) {
             </tbody>
           </table>
 
+          {sc.locations && sc.locations.length > 0 && (
+            <>
+              <HSub>Unidades / Locais de execução</HSub>
+              <ul style={ulStyle}>{sc.locations.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            </>
+          )}
+
           <HSec num="02">Objeto e Escopo</HSec>
           <p style={leadStyle}>{sc.generalConsiderations?.trim() || DEFAULT_OBJETO}</p>
           {sc.items?.length > 0 && (
@@ -300,6 +329,30 @@ export function ProposalPremiumView({ proposal }: Props) {
             </tbody>
           </table>
           <p style={{ fontSize: '6.8pt', color: C.muted, margin: '3px 0 0', fontStyle: 'italic' }}>As normas aplicáveis são confirmadas conforme o escopo final contratado.</p>
+
+          {sc.maintenancePlan && sc.maintenancePlan.length > 0 && (
+            <>
+              <HSub>Matriz de periodicidade</HSub>
+              <table style={{ width: '100%', borderCollapse: 'collapse', margin: '6px 0 4px' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Equipamento</th>
+                    <th style={thStyle}>Tipo de inspeção</th>
+                    <th style={{ ...thStyle, width: '22%' }}>Frequência</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sc.maintenancePlan.map((t, i) => (
+                    <tr key={t.id} style={{ background: i % 2 ? C.paper2 : C.paper }}>
+                      <td style={tdStyle}>{t.equipment}</td>
+                      <td style={tdStyle}>{t.inspection}</td>
+                      <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '11pt' }}>{t.frequency}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
 
           <HSec num="03">Exclusões do Escopo</HSec>
           <p style={leadStyle}>Estão <strong style={{ color: C.ink }}>excluídos</strong> do presente escopo, salvo negociação expressa em contrário:</p>
@@ -337,7 +390,13 @@ export function ProposalPremiumView({ proposal }: Props) {
             </thead>
             <tbody>
               {(items.length > 0
-                ? items.map((it, i) => [String(i + 1).padStart(2, '0'), it.description, String(it.quantity), formatCurrency(it.unitPrice), formatCurrency(it.totalPrice)])
+                ? items.map((it, i) => [
+                    String(i + 1).padStart(2, '0'),
+                    it.billingType === 'monthly' ? `${it.description} — mensal × ${it.contractMonths || 12}` : it.description,
+                    String(it.quantity),
+                    it.billingType === 'monthly' ? `${formatCurrency(it.unitPrice)}/mês` : formatCurrency(it.unitPrice),
+                    formatCurrency(itemContractValue(it)),
+                  ])
                 : DEFAULT_ITEMS.map((desc, i) => [String(i + 1).padStart(2, '0'), desc, '1', 'R$ —', 'R$ —'])
               ).map((row, i) => (
                 <tr key={i} style={{ background: i % 2 ? C.paper2 : C.paper }}>
@@ -361,6 +420,31 @@ export function ProposalPremiumView({ proposal }: Props) {
             <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: '6.6pt', letterSpacing: '.1em', textTransform: 'uppercase', display: 'block', marginBottom: 3, color: C.warn }}>Itens não inclusos</span>
             Plataformas elevatórias e andaimes para trabalhos em altura deverão ser fornecidos pela Contratante e <strong style={{ color: C.warn }}>não estão inclusos</strong> no valor acima.
           </div>
+
+          {com.onDemandServices && com.onDemandServices.length > 0 && (
+            <>
+              <HSub>Serviços sob demanda</HSub>
+              <table style={{ width: '100%', borderCollapse: 'collapse', margin: '6px 0 4px' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Serviço</th>
+                    <th style={{ ...thStyle, width: '24%' }}>Unidade</th>
+                    <th style={{ ...thStyle, width: '20%', textAlign: 'right' }}>Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {com.onDemandServices.map((s, i) => (
+                    <tr key={s.id} style={{ background: i % 2 ? C.paper2 : C.paper }}>
+                      <td style={tdStyle}>{s.description}</td>
+                      <td style={tdStyle}>{s.unit}</td>
+                      <td style={{ ...tdStyle, fontFamily: MONO, fontSize: '11pt', textAlign: 'right' }}>{formatCurrency(s.price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ fontSize: '6.8pt', color: C.muted, margin: '3px 0 0', fontStyle: 'italic' }}>Valores cobrados por evento/acionamento — não inclusos no investimento total.</p>
+            </>
+          )}
 
           <HSec num="06">Condições Comerciais</HSec>
           <div style={{ display: 'flex', gap: 0, border: `.6px solid ${C.line}`, borderRadius: 3, overflow: 'hidden', margin: '10px 0' }}>
@@ -400,4 +484,49 @@ export function ProposalPremiumView({ proposal }: Props) {
       </div>
     </div>
   );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Rota de impressão: /proposal/:id?print=1
+// Carrega a proposta por id e renderiza a prévia premium em modo auto-print.
+// ══════════════════════════════════════════════════════════════════════════════
+export function ProposalPrintRoute({ id }: { id: string }) {
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    proposalService
+      .getProposal(id)
+      .then((p) => {
+        if (!active) return;
+        if (p) setProposal(p);
+        else setNotFound(true);
+      })
+      .catch(() => active && setNotFound(true));
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  if (notFound) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, fontFamily: SANS, color: C.ink2 }}>
+        <AlertCircle size={44} color={C.brand} />
+        <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Proposta não encontrada</h1>
+        <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>O link pode ter expirado ou estar incorreto.</p>
+      </div>
+    );
+  }
+
+  if (!proposal) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 44, height: 44, border: `3px solid ${C.line}`, borderTopColor: C.brand, borderRadius: '50%', animation: 'pfmspin 0.8s linear infinite' }} />
+        <style>{`@keyframes pfmspin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  return <ProposalPremiumView proposal={proposal} autoPrint />;
 }

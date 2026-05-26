@@ -14,6 +14,7 @@ import { ProposalWizard } from './components/ProposalWizard';
 import { BudgetManager } from './components/BudgetManager';
 import { NormsManager } from './components/NormsManager';
 import { PublicProposalView } from './components/PublicProposalView';
+import { ProposalPrintRoute } from './components/ProposalPremiumView';
 import { ManualProposalModal } from './components/ManualProposalModal';
 import { DailyBriefing } from './components/DailyBriefing';
 import { Reports } from './components/Reports';
@@ -28,6 +29,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isPublic, setIsPublic] = useState(false);
   const [publicId, setPublicId] = useState('');
+  const [printMode, setPrintMode] = useState(false);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [showRadar, setShowRadar] = useState(false);
 
@@ -36,6 +38,8 @@ function AppContent() {
     if (path.startsWith('/proposal/')) {
       setIsPublic(true);
       setPublicId(path.replace('/proposal/', ''));
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('print') === '1') setPrintMode(true);
     }
   }, []);
 
@@ -53,7 +57,9 @@ function AppContent() {
   }, [user]);
 
   if (isPublic) {
-    return <PublicProposalView id={publicId} />;
+    return printMode
+      ? <ProposalPrintRoute id={publicId} />
+      : <PublicProposalView id={publicId} />;
   }
 
   if (loading) {

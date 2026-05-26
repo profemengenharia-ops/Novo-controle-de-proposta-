@@ -19,6 +19,14 @@ export interface TechnicalScopeItem {
   description: string;
 }
 
+/** Linha da matriz de periodicidade de manutenção. */
+export interface MaintenanceTask {
+  id: string;
+  equipment: string;   // Equipamento / sistema
+  inspection: string;  // Tipo de inspeção / serviço
+  frequency: string;   // Mensal, Trimestral, Semestral, Anual, etc.
+}
+
 export interface TechnicalScope {
   generalConsiderations: string;
   references: string[];
@@ -28,6 +36,10 @@ export interface TechnicalScope {
   exclusions: string[];
   contractorObligations: string[];
   contracteeObligations: string[];
+  /** Unidades / locais de execução (contratos multi-site). */
+  locations?: string[];
+  /** Matriz de periodicidade de manutenção. */
+  maintenancePlan?: MaintenanceTask[];
 }
 
 export interface CDDetails {
@@ -76,6 +88,18 @@ export interface CommercialItem {
   totalPrice: number;
   source?: 'manual' | 'catalog' | 'spreadsheet' | 'erp' | 'engineering';
   priceFormation?: PriceFormation;
+  /** 'once' = valor único; 'monthly' = recorrente (mensalidade). Default: 'once'. */
+  billingType?: 'once' | 'monthly';
+  /** Nº de meses do contrato quando billingType === 'monthly'. Default: 12. */
+  contractMonths?: number;
+}
+
+/** Serviço adicional cobrado sob demanda (tabela de preços / chamados). */
+export interface OnDemandService {
+  id: string;
+  description: string;
+  unit: string;   // ex: "por visita", "por hora"
+  price: number;
 }
 
 export interface CommercialProposal {
@@ -85,6 +109,8 @@ export interface CommercialProposal {
   guarantee: string;
   items: CommercialItem[];
   pricingMode?: string;
+  /** Serviços sob demanda / chamados — não somam no valor total do contrato. */
+  onDemandServices?: OnDemandService[];
 }
 
 export interface ContractDetails {
