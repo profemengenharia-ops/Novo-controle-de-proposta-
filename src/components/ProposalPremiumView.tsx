@@ -497,14 +497,16 @@ export function ProposalPremiumView({ proposal, autoPrint = false }: Props) {
 // Rota de impressão: /proposal/:id?print=1
 // Carrega a proposta por id e renderiza a prévia premium em modo auto-print.
 // ══════════════════════════════════════════════════════════════════════════════
-export function ProposalPrintRoute({ id }: { id: string }) {
+export function ProposalPrintRoute({ id, publicToken }: { id: string; publicToken?: string }) {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     let active = true;
-    proposalService
-      .getProposal(id)
+    const loader = publicToken
+      ? proposalService.getPublicProposal(id, publicToken)
+      : proposalService.getProposal(id);
+    loader
       .then((p) => {
         if (!active) return;
         if (p) setProposal(p);
@@ -514,7 +516,7 @@ export function ProposalPrintRoute({ id }: { id: string }) {
     return () => {
       active = false;
     };
-  }, [id]);
+  }, [id, publicToken]);
 
   if (notFound) {
     return (

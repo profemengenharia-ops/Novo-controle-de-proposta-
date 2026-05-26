@@ -33,6 +33,7 @@ function AppContent() {
   });
   const [isPublic, setIsPublic] = useState(false);
   const [publicId, setPublicId] = useState('');
+  const [publicToken, setPublicToken] = useState('');
   const [printMode, setPrintMode] = useState(false);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [showRadar, setShowRadar] = useState(false);
@@ -43,6 +44,7 @@ function AppContent() {
       setIsPublic(true);
       setPublicId(path.replace('/proposal/', ''));
       const params = new URLSearchParams(window.location.search);
+      setPublicToken(params.get('token') || '');
       if (params.get('print') === '1') setPrintMode(true);
     }
   }, []);
@@ -82,8 +84,8 @@ function AppContent() {
 
   if (isPublic) {
     return printMode
-      ? <ProposalPrintRoute id={publicId} />
-      : <PublicProposalView id={publicId} />;
+      ? <ProposalPrintRoute id={publicId} publicToken={publicToken} />
+      : <PublicProposalView id={publicId} publicToken={publicToken} />;
   }
 
   if (loading) {

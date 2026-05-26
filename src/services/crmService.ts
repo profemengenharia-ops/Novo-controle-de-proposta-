@@ -1,9 +1,12 @@
-import { isMockMode } from '../lib/supabase';
+import { supabase, isMockMode } from '../lib/supabase';
 import { Vendor, CRMOpportunity, CRMClient } from '../types';
 
 const LS_VENDORS = 'crm_vendors_v1';
 const LS_OPPS = 'crm_opportunities_v1';
 const LS_CLIENTS = 'crm_clients_v1';
+const TABLE_VENDORS = 'crm_vendors';
+const TABLE_OPPS = 'crm_opportunities';
+const TABLE_CLIENTS = 'crm_clients';
 
 function load<T>(key: string, seed: T[]): T[] {
   try {
@@ -257,11 +260,103 @@ const SEED_OPPS: CRMOpportunity[] = [
   },
 ];
 
+const mapVendorFromDb = (row: any): Vendor => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  phone: row.phone,
+  role: row.role,
+  active: row.active,
+  createdAt: row.created_at,
+});
+
+const mapVendorToDb = (vendor: Partial<Vendor>) => {
+  const data: any = {};
+  if (vendor.name !== undefined) data.name = vendor.name;
+  if (vendor.email !== undefined) data.email = vendor.email;
+  if (vendor.phone !== undefined) data.phone = vendor.phone;
+  if (vendor.role !== undefined) data.role = vendor.role;
+  if (vendor.active !== undefined) data.active = vendor.active;
+  return data;
+};
+
+const mapClientFromDb = (row: any): CRMClient => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  phone: row.phone,
+  company: row.company,
+  segment: row.segment,
+  city: row.city,
+  notes: row.notes,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const mapClientToDb = (client: Partial<CRMClient>) => {
+  const data: any = {};
+  if (client.name !== undefined) data.name = client.name;
+  if (client.email !== undefined) data.email = client.email;
+  if (client.phone !== undefined) data.phone = client.phone;
+  if (client.company !== undefined) data.company = client.company;
+  if (client.segment !== undefined) data.segment = client.segment;
+  if (client.city !== undefined) data.city = client.city;
+  if (client.notes !== undefined) data.notes = client.notes;
+  return data;
+};
+
+const mapOpportunityFromDb = (row: any): CRMOpportunity => ({
+  id: row.id,
+  title: row.title,
+  clientName: row.client_name,
+  value: Number(row.value ?? 0),
+  stage: row.stage,
+  vendorId: row.vendor_id,
+  linkedProposalId: row.linked_proposal_id,
+  linkedBudgetId: row.linked_budget_id,
+  probability: Number(row.probability ?? 0),
+  expectedCloseDate: row.expected_close_date,
+  activities: row.activities ?? [],
+  tasks: row.tasks ?? [],
+  notes: row.notes,
+  lossReason: row.loss_reason,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  createdBy: row.created_by,
+});
+
+const mapOpportunityToDb = (opportunity: Partial<CRMOpportunity>) => {
+  const data: any = {};
+  if (opportunity.title !== undefined) data.title = opportunity.title;
+  if (opportunity.clientName !== undefined) data.client_name = opportunity.clientName;
+  if (opportunity.value !== undefined) data.value = opportunity.value;
+  if (opportunity.stage !== undefined) data.stage = opportunity.stage;
+  if (opportunity.vendorId !== undefined) data.vendor_id = opportunity.vendorId;
+  if (opportunity.linkedProposalId !== undefined) data.linked_proposal_id = opportunity.linkedProposalId;
+  if (opportunity.linkedBudgetId !== undefined) data.linked_budget_id = opportunity.linkedBudgetId;
+  if (opportunity.probability !== undefined) data.probability = opportunity.probability;
+  if (opportunity.expectedCloseDate !== undefined) data.expected_close_date = opportunity.expectedCloseDate;
+  if (opportunity.activities !== undefined) data.activities = opportunity.activities;
+  if (opportunity.tasks !== undefined) data.tasks = opportunity.tasks;
+  if (opportunity.notes !== undefined) data.notes = opportunity.notes;
+  if (opportunity.lossReason !== undefined) data.loss_reason = opportunity.lossReason;
+  if (opportunity.createdBy !== undefined) data.created_by = opportunity.createdBy;
+  return data;
+};
+
 export const crmService = {
   // ── Vendors ────────────────────────────────────────────────────────────────
   async getVendors(): Promise<Vendor[]> {
     if (isMockMode) return load(LS_VENDORS, SEED_VENDORS);
-    return [];
+    const { data, error } = await supabase
+      .from(TABLE_VENDORS)
+      .select('*')
+      .order('name', { ascending: true });
+    if (error) {
+      console.error(error);
+      return [];
+    }
+    return data.map(mapVendorFromDb);
   },
 
   async createVendor(fields: Omit<Vendor, 'id' | 'createdAt'>): Promise<string> {
@@ -271,8 +366,15 @@ export const crmService = {
       const store = load<Vendor>(LS_VENDORS, SEED_VENDORS);
       store.push(vendor);
       save(LS_VENDORS, store);
+      return id;
     }
-    return id;
+    const { data, error } = await supabase
+      .from(TABLE_VENDORS)
+      .insert([mapVendorToDb(fields)])
+      .select('id')
+      .single();
+    if (error) throw error;
+    return data.id;
   },
 
   async updateVendor(id: string, updates: Partial<Vendor>): Promise<void> {
@@ -281,19 +383,33 @@ export const crmService = {
       const idx = store.findIndex(v => v.id === id);
       if (idx !== -1) store[idx] = { ...store[idx], ...updates };
       save(LS_VENDORS, store);
+      return;
     }
+    const { error } = await supabase.from(TABLE_VENDORS).update(mapVendorToDb(updates)).eq('id', id);
+    if (error) throw error;
   },
 
   async deleteVendor(id: string): Promise<void> {
     if (isMockMode) {
       save(LS_VENDORS, load<Vendor>(LS_VENDORS, SEED_VENDORS).filter(v => v.id !== id));
+      return;
     }
+    const { error } = await supabase.from(TABLE_VENDORS).delete().eq('id', id);
+    if (error) throw error;
   },
 
   // ── Opportunities ──────────────────────────────────────────────────────────
   async getOpportunities(): Promise<CRMOpportunity[]> {
     if (isMockMode) return load(LS_OPPS, SEED_OPPS);
-    return [];
+    const { data, error } = await supabase
+      .from(TABLE_OPPS)
+      .select('*')
+      .order('updated_at', { ascending: false });
+    if (error) {
+      console.error(error);
+      return [];
+    }
+    return data.map(mapOpportunityFromDb);
   },
 
   async createOpportunity(
@@ -306,8 +422,15 @@ export const crmService = {
       const store = load<CRMOpportunity>(LS_OPPS, SEED_OPPS);
       store.push(opp);
       save(LS_OPPS, store);
+      return id;
     }
-    return id;
+    const { data, error } = await supabase
+      .from(TABLE_OPPS)
+      .insert([mapOpportunityToDb(opp)])
+      .select('id')
+      .single();
+    if (error) throw error;
+    return data.id;
   },
 
   async updateOpportunity(id: string, updates: Partial<CRMOpportunity>): Promise<void> {
@@ -317,19 +440,33 @@ export const crmService = {
       if (idx !== -1)
         store[idx] = { ...store[idx], ...updates, updatedAt: new Date().toISOString() };
       save(LS_OPPS, store);
+      return;
     }
+    const { error } = await supabase.from(TABLE_OPPS).update(mapOpportunityToDb(updates)).eq('id', id);
+    if (error) throw error;
   },
 
   async deleteOpportunity(id: string): Promise<void> {
     if (isMockMode) {
       save(LS_OPPS, load<CRMOpportunity>(LS_OPPS, SEED_OPPS).filter(o => o.id !== id));
+      return;
     }
+    const { error } = await supabase.from(TABLE_OPPS).delete().eq('id', id);
+    if (error) throw error;
   },
 
   // ── Clients ────────────────────────────────────────────────────────────────
   async getClients(): Promise<CRMClient[]> {
     if (isMockMode) return load(LS_CLIENTS, SEED_CLIENTS);
-    return [];
+    const { data, error } = await supabase
+      .from(TABLE_CLIENTS)
+      .select('*')
+      .order('updated_at', { ascending: false });
+    if (error) {
+      console.error(error);
+      return [];
+    }
+    return data.map(mapClientFromDb);
   },
 
   async createClient(fields: Omit<CRMClient, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
@@ -340,8 +477,15 @@ export const crmService = {
       const store = load<CRMClient>(LS_CLIENTS, SEED_CLIENTS);
       store.push(client);
       save(LS_CLIENTS, store);
+      return id;
     }
-    return id;
+    const { data, error } = await supabase
+      .from(TABLE_CLIENTS)
+      .insert([mapClientToDb(client)])
+      .select('id')
+      .single();
+    if (error) throw error;
+    return data.id;
   },
 
   async updateClient(id: string, updates: Partial<CRMClient>): Promise<void> {
@@ -351,12 +495,18 @@ export const crmService = {
       if (idx !== -1)
         store[idx] = { ...store[idx], ...updates, updatedAt: new Date().toISOString() };
       save(LS_CLIENTS, store);
+      return;
     }
+    const { error } = await supabase.from(TABLE_CLIENTS).update(mapClientToDb(updates)).eq('id', id);
+    if (error) throw error;
   },
 
   async deleteClient(id: string): Promise<void> {
     if (isMockMode) {
       save(LS_CLIENTS, load<CRMClient>(LS_CLIENTS, SEED_CLIENTS).filter(c => c.id !== id));
+      return;
     }
+    const { error } = await supabase.from(TABLE_CLIENTS).delete().eq('id', id);
+    if (error) throw error;
   },
 };

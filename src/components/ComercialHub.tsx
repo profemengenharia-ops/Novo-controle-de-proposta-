@@ -1060,7 +1060,7 @@ export function ComercialHub({ onNavigate }: Props) {
     setActiveTab('obras');
   };
 
-  const createdBy = user?.email ?? user?.id ?? 'user';
+  const createdBy = user?.id ?? 'user';
 
   const TABS: { key: HubTab; label: string; icon: React.ElementType }[] = [
     { key: 'monitoramento', label: 'Monitoramento', icon: Activity },

@@ -104,6 +104,41 @@ export function ProposalList({ onEdit }: ProposalListProps) {
     }
   };
 
+  const publicUrlFor = (proposalId: string, token: string) => {
+    const url = new URL(`/proposal/${proposalId}`, window.location.origin);
+    url.searchParams.set('token', token);
+    return url.toString();
+  };
+
+  const handleCopyPublicLink = async (p: Proposal) => {
+    try {
+      const token = p.publicToken || await proposalService.ensurePublicToken(p.id);
+      await navigator.clipboard.writeText(publicUrlFor(p.id, token));
+      setProposals(items => items.map(item => item.id === p.id ? { ...item, publicToken: token } : item));
+      toast.success('Link publico copiado!');
+    } catch (e) {
+      console.error(e);
+      toast.error('Nao foi possivel gerar o link publico.');
+    } finally {
+      setActiveActionsMenu(null);
+    }
+  };
+
+  const handleOpenPrint = async (p: Proposal) => {
+    try {
+      const token = p.publicToken || await proposalService.ensurePublicToken(p.id);
+      const url = new URL(publicUrlFor(p.id, token));
+      url.searchParams.set('print', '1');
+      window.open(url.toString(), '_blank');
+      setProposals(items => items.map(item => item.id === p.id ? { ...item, publicToken: token } : item));
+    } catch (e) {
+      console.error(e);
+      toast.error('Nao foi possivel abrir a versao publica.');
+    } finally {
+      setActiveActionsMenu(null);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!confirmDeleteId) return;
     try {
@@ -145,7 +180,17 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   };
 
   const handleDuplicateWithRevision = async (p: Proposal) => {
-    const { id, createdAt, updatedAt, ...rest } = p;
+    const {
+      id,
+      createdAt,
+      updatedAt,
+      publicToken,
+      publicExpiresAt,
+      approvedAt,
+      approvedBy,
+      approvalSignature,
+      ...rest
+    } = p;
     const baseRev = parseInt(rest.revision);
     const nextRev = String((Number.isFinite(baseRev) ? baseRev : 0) + 1).padStart(2, '0');
     const newProposal: Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -169,7 +214,17 @@ export function ProposalList({ onEdit }: ProposalListProps) {
   const handleCloneProposal = async (p: Proposal) => {
     // Clonagem total: nova proposta (novo número, revisão 00) reaproveitando
     // toda a estrutura. Diferente de "Gerar Nova Revisão" (mesma proposta).
-    const { id, createdAt, updatedAt, ...rest } = p;
+    const {
+      id,
+      createdAt,
+      updatedAt,
+      publicToken,
+      publicExpiresAt,
+      approvedAt,
+      approvedBy,
+      approvalSignature,
+      ...rest
+    } = p;
     const newProposal: Omit<Proposal, 'id' | 'createdAt' | 'updatedAt'> = {
       ...rest,
       proposalNumber: `PF-${new Date().getFullYear()}-${crypto.randomUUID().split('-')[0].toUpperCase().slice(0, 4)}`,
@@ -344,10 +399,10 @@ export function ProposalList({ onEdit }: ProposalListProps) {
                             <button onClick={() => handleCloneProposal(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Copy size={14} className="opacity-40" /> Clonar Proposta
                             </button>
-                            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/proposal/${p.id}`).then(() => toast.success('Link copiado!')); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                            <button onClick={() => handleCopyPublicLink(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <ExternalLink size={14} className="opacity-40" /> Copiar Link Público
                             </button>
-                            <button onClick={() => { window.open(`/proposal/${p.id}?print=1`, '_blank'); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
+                            <button onClick={() => handleOpenPrint(p)} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">
                               <Download size={14} className="opacity-40" /> Baixar PDF
                             </button>
                             <button onClick={() => { handleDownloadDocx(p); setActiveActionsMenu(null); }} className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-black/5 font-bold transition-colors">

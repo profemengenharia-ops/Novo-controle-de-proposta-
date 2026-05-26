@@ -2,6 +2,8 @@ export enum ProposalStatus {
   DRAFT = 'rascunho',
   SENT = 'enviada',
   NEGOTIATING = 'em_negociacao',
+  PRICED = 'calculado',
+  ESTIMATED = 'estimado_manualmente',
   WON = 'ganha',
   LOST = 'perdida',
   EXPIRED = 'expirada'
@@ -142,6 +144,11 @@ export interface Proposal {
   pricing?: GlobalPriceFormation;
   vendorId?: string;
   vendorName?: string;
+  publicToken?: string;
+  publicExpiresAt?: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  approvalSignature?: string;
 }
 
 export interface PricingBudgetItem {

@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
 import { Proposal, ProposalStatus } from '../types';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { proposalService } from '../services/proposalService';
 
 interface ProposalStatusCardProps {
   proposalId: string;
@@ -18,42 +18,23 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
   useEffect(() => {
     if (!initialProposal) {
       const fetchProposal = async () => {
-        const { data, error } = await supabase
-          .from('proposals')
-          .select('*')
-          .eq('id', proposalId)
-          .single();
-        if (data && !error) setProposal(data as any);
+        const data = await proposalService.getProposal(proposalId);
+        if (data) setProposal(data);
         setLoading(false);
       };
       fetchProposal();
     }
 
-    const channel = supabase
-      .channel(`proposal_update_${proposalId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'proposals',
-          filter: `id=eq.${proposalId}`,
-        },
-        (payload) => {
-          const updated = payload.new as any;
-          setProposal(updated);
-          if (updated.status === 'calculado') {
-            toast.success('Engenharia financeira concluída com sucesso!');
-          } else if (updated.status === 'estimado_manualmente') {
-            toast.warning('IA indisponível. Usando valores estimados de segurança.');
-          }
-        }
-      )
-      .subscribe();
+    const unsubscribe = proposalService.subscribeToProposal(proposalId, (updated) => {
+      setProposal(updated);
+      if (updated.status === ProposalStatus.PRICED) {
+        toast.success('Engenharia financeira concluida com sucesso!');
+      } else if (updated.status === ProposalStatus.ESTIMATED) {
+        toast.warning('IA indisponivel. Usando valores estimados de seguranca.');
+      }
+    });
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => unsubscribe();
   }, [proposalId, initialProposal]);
 
   if (loading || !proposal) {
@@ -64,25 +45,44 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
     );
   }
 
-  const isCalculated = proposal.status === ProposalStatus.WON;
+  const pricing = proposal.pricing as any;
+  const suggestedPrice =
+    pricing?.suggested_price ??
+    pricing?.final_price ??
+    pricing?.total_estimated ??
+    proposal.commercialProposal?.totalValue ??
+    0;
+  const margin = pricing?.net_profit_margin_percent ?? pricing?.margin_percent ?? null;
+  const isCalculated = proposal.status === ProposalStatus.PRICED || proposal.status === ProposalStatus.WON;
+  const isEstimated = proposal.status === ProposalStatus.ESTIMATED;
   const isPending = proposal.status === ProposalStatus.DRAFT || proposal.status === ProposalStatus.NEGOTIATING;
 
   return (
-    <motion.div 
+    <motion.div
       layout
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "p-6 rounded-[2rem] border transition-all duration-500 shadow-xl",
-        isCalculated ? "bg-green-50/50 border-green-100" : "bg-white border-black/5"
+        'p-6 rounded-[2rem] border transition-all duration-500 shadow-xl',
+        isCalculated
+          ? 'bg-green-50/50 border-green-100'
+          : isEstimated
+            ? 'bg-orange-50/50 border-orange-100'
+            : 'bg-white border-black/5',
       )}
     >
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-center gap-4">
-          <div className={cn(
-            "w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-colors",
-            isCalculated ? "bg-green-500 text-white" : "bg-black text-white"
-          )}>
+          <div
+            className={cn(
+              'w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-colors',
+              isCalculated
+                ? 'bg-green-500 text-white'
+                : isEstimated
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-black text-white',
+            )}
+          >
             {isCalculated ? <CheckCircle2 size={24} /> : <Calculator size={24} />}
           </div>
           <div>
@@ -94,11 +94,13 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
             </p>
           </div>
         </div>
-        
-        <div className={cn(
-          "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-white flex items-center gap-2",
-          isCalculated ? "bg-green-500" : "bg-neutral-900"
-        )}>
+
+        <div
+          className={cn(
+            'px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-white flex items-center gap-2',
+            isCalculated ? 'bg-green-500' : isEstimated ? 'bg-orange-500' : 'bg-neutral-900',
+          )}
+        >
           {isPending && <Loader2 size={10} className="animate-spin" />}
           {proposal.status.replace('_', ' ')}
         </div>
@@ -106,7 +108,7 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
 
       <AnimatePresence mode="wait">
         {isPending ? (
-          <motion.div 
+          <motion.div
             key="pending"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -115,11 +117,11 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
           >
             <Loader2 className="animate-spin text-blue-500" size={16} />
             <p className="text-xs font-bold text-blue-700 italic">
-              O cérebro financeiro está processando os dados de vistoria...
+              O cerebro financeiro esta processando os dados de vistoria...
             </p>
           </motion.div>
-        ) : isCalculated ? (
-          <motion.div 
+        ) : isCalculated || isEstimated ? (
+          <motion.div
             key="done"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -127,21 +129,27 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
           >
             <div className="flex justify-between items-end">
               <div className="space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">Preço de Venda Sugerido</span>
-                <p className="text-3xl font-black text-green-600 tracking-tighter">
-                  {formatCurrency((proposal as any).pricing_details?.total_estimated || 0)}
+                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                  Preco de Venda Sugerido
+                </span>
+                <p className={cn('text-3xl font-black tracking-tighter', isEstimated ? 'text-orange-600' : 'text-green-600')}>
+                  {formatCurrency(suggestedPrice)}
                 </p>
               </div>
               <div className="text-right">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">Margem Estimada</span>
-                <p className="text-sm font-black text-neutral-900">15.00%</p>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                  Margem Estimada
+                </span>
+                <p className="text-sm font-black text-neutral-900">
+                  {typeof margin === 'number' ? `${margin.toFixed(2)}%` : 'A calcular'}
+                </p>
               </div>
             </div>
           </motion.div>
         ) : (
           <div className="flex items-center gap-3 p-4 bg-neutral-100 rounded-2xl">
-             <AlertCircle size={16} className="text-neutral-400" />
-             <p className="text-xs font-bold text-neutral-500">Aguardando início do processamento.</p>
+            <AlertCircle size={16} className="text-neutral-400" />
+            <p className="text-xs font-bold text-neutral-500">Aguardando inicio do processamento.</p>
           </div>
         )}
       </AnimatePresence>
@@ -149,7 +157,6 @@ export function ProposalStatusCard({ proposalId, initialProposal }: ProposalStat
   );
 }
 
-// Minimal cn helper if not available globally
-function cn(...inputs: any[]) {
+function cn(...inputs: Array<string | false | null | undefined>) {
   return inputs.filter(Boolean).join(' ');
 }

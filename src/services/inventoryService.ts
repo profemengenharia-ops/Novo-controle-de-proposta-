@@ -30,6 +30,8 @@ const mapToDb = (product: Partial<Product>) => {
   if (product.costPrice !== undefined) data.cost_price = product.costPrice;
   if (product.stockLevel !== undefined) data.stock_level = product.stockLevel;
   if (product.minStockLevel !== undefined) data.min_stock_level = product.minStockLevel;
+  if (product.supplier !== undefined) data.supplier = product.supplier;
+  if (product.location !== undefined) data.location = product.location;
   return data;
 };
 

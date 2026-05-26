@@ -32,10 +32,22 @@ async function syncLinkedOpportunityStage(proposalId: string, status?: ProposalS
 
 const MOCK_STORAGE_KEY = 'mock_proposals_v1';
 
+const newPublicToken = () => `${crypto.randomUUID()}-${crypto.randomUUID()}`.replace(/-/g, '');
+
+const normalizeMockProposal = (proposal: Proposal): Proposal => ({
+  ...proposal,
+  interactions: proposal.interactions || [],
+  publicToken: proposal.publicToken || newPublicToken(),
+});
+
 const loadMockStore = (): Proposal[] => {
   try {
     const raw = localStorage.getItem(MOCK_STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Proposal[];
+    if (raw) {
+      const parsed = (JSON.parse(raw) as Proposal[]).map(normalizeMockProposal);
+      localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(parsed));
+      return parsed;
+    }
   } catch (e) {
     console.warn('Mock store parse failed, resetting.', e);
   }
@@ -52,7 +64,9 @@ const loadMockStore = (): Proposal[] => {
       validityDays: 30,
       technicalScope: { items: [] } as any,
       commercialProposal: { totalValue: 50000, items: [] } as any,
-      deadline: '30 dias'
+      deadline: '30 dias',
+      publicToken: newPublicToken(),
+      interactions: [],
     }
   ];
   localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(seed));
@@ -80,10 +94,16 @@ const mapFromDb = (row: any): Proposal => ({
   updatedAt: row.updated_at,
   createdBy: row.created_by,
   revisions: row.revisions,
+  interactions: row.interactions ?? [],
   lossReason: row.loss_reason,
   deadline: row.deadline ?? '',
   vendorId: row.vendor_id,
   vendorName: row.vendor_name,
+  publicToken: row.public_token,
+  publicExpiresAt: row.public_expires_at,
+  approvedAt: row.approved_at,
+  approvedBy: row.approved_by,
+  approvalSignature: row.approval_signature,
 });
 
 const mapToDb = (proposal: Partial<Proposal>) => {
@@ -101,9 +121,16 @@ const mapToDb = (proposal: Partial<Proposal>) => {
   if (proposal.followUpDate !== undefined) data.follow_up_date = proposal.followUpDate;
   if (proposal.createdBy !== undefined) data.created_by = proposal.createdBy;
   if (proposal.revisions !== undefined) data.revisions = proposal.revisions;
+  if (proposal.interactions !== undefined) data.interactions = proposal.interactions;
   if (proposal.lossReason !== undefined) data.loss_reason = proposal.lossReason;
+  if (proposal.deadline !== undefined) data.deadline = proposal.deadline;
   if (proposal.vendorId !== undefined) data.vendor_id = proposal.vendorId;
   if (proposal.vendorName !== undefined) data.vendor_name = proposal.vendorName;
+  if (proposal.publicToken !== undefined) data.public_token = proposal.publicToken;
+  if (proposal.publicExpiresAt !== undefined) data.public_expires_at = proposal.publicExpiresAt;
+  if (proposal.approvedAt !== undefined) data.approved_at = proposal.approvedAt;
+  if (proposal.approvedBy !== undefined) data.approved_by = proposal.approvedBy;
+  if (proposal.approvalSignature !== undefined) data.approval_signature = proposal.approvalSignature;
   return data;
 };
 
@@ -116,6 +143,8 @@ export const proposalService = {
         id: crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
+        publicToken: (proposal as Proposal).publicToken || newPublicToken(),
+        interactions: (proposal as Proposal).interactions || [],
       };
       const store = loadMockStore();
       store.unshift(newProposal);
@@ -147,6 +176,46 @@ export const proposalService = {
     return mapFromDb(data);
   },
 
+  async getPublicProposal(id: string, publicToken: string): Promise<Proposal | null> {
+    if (!publicToken) return null;
+    if (isMockMode) {
+      return loadMockStore().find(p => p.id === id && p.publicToken === publicToken) ?? null;
+    }
+    const { data, error } = await supabase
+      .rpc('get_public_proposal', {
+        p_proposal_id: id,
+        p_public_token: publicToken,
+      })
+      .single();
+
+    if (error || !data) return null;
+    return mapFromDb(data);
+  },
+
+  async ensurePublicToken(id: string): Promise<string> {
+    if (isMockMode) {
+      const store = loadMockStore();
+      const idx = store.findIndex(p => p.id === id);
+      if (idx === -1) throw new Error('Proposta nao encontrada.');
+      if (!store[idx].publicToken) {
+        store[idx] = { ...store[idx], publicToken: newPublicToken() };
+        saveMockStore(store);
+      }
+      return store[idx].publicToken!;
+    }
+
+    const current = await this.getProposal(id);
+    if (current?.publicToken) return current.publicToken;
+
+    const token = newPublicToken();
+    const { error } = await supabase
+      .from(TABLE_NAME)
+      .update({ public_token: token })
+      .eq('id', id);
+    if (error) throw error;
+    return token;
+  },
+
   async getAllProposals(): Promise<Proposal[]> {
     if (isMockMode) {
       return loadMockStore();
@@ -158,6 +227,46 @@ export const proposalService = {
 
     if (error) return [];
     return data.map(mapFromDb);
+  },
+
+  async approvePublicProposal(id: string, publicToken: string, signature: string): Promise<Proposal> {
+    if (!publicToken) throw new Error('Link publico invalido.');
+    if (isMockMode) {
+      const store = loadMockStore();
+      const idx = store.findIndex(p => p.id === id && p.publicToken === publicToken);
+      if (idx === -1) throw new Error('Proposta nao encontrada.');
+      const approvalInteraction = {
+        id: crypto.randomUUID().split('-')[0],
+        createdAt: new Date().toISOString(),
+        note: 'Proposta aprovada pelo link publico.',
+        user: signature,
+      };
+      store[idx] = {
+        ...store[idx],
+        status: ProposalStatus.WON,
+        approvedAt: new Date().toISOString(),
+        approvedBy: signature,
+        approvalSignature: signature,
+        interactions: [...(store[idx].interactions || []), approvalInteraction],
+        updatedAt: new Date().toISOString(),
+      };
+      saveMockStore(store);
+      await syncLinkedOpportunityStage(id, ProposalStatus.WON);
+      return store[idx];
+    }
+
+    const { data, error } = await supabase
+      .rpc('approve_public_proposal', {
+        p_proposal_id: id,
+        p_public_token: publicToken,
+        p_signature: signature,
+      })
+      .single();
+
+    if (error || !data) throw error || new Error('Proposta nao encontrada.');
+    const approved = mapFromDb(data);
+    await syncLinkedOpportunityStage(id, approved.status);
+    return approved;
   },
 
   async updateProposal(id: string, updates: Partial<Proposal>, revisionNote?: string): Promise<void> {

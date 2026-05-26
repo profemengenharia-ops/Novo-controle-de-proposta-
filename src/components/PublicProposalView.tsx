@@ -18,9 +18,10 @@ import { toast } from 'sonner';
 
 interface PublicViewProps {
   id: string;
+  publicToken: string;
 }
 
-export function PublicProposalView({ id }: PublicViewProps) {
+export function PublicProposalView({ id, publicToken }: PublicViewProps) {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [loading, setLoading] = useState(true);
   const [approvedTech, setApprovedTech] = useState(false);
@@ -31,12 +32,12 @@ export function PublicProposalView({ id }: PublicViewProps) {
 
   useEffect(() => {
     async function load() {
-      const data = await proposalService.getProposal(id);
+      const data = await proposalService.getPublicProposal(id, publicToken);
       setProposal(data);
       setLoading(false);
     }
     load();
-  }, [id]);
+  }, [id, publicToken]);
 
   if (loading) {
     return (
@@ -68,8 +69,8 @@ export function PublicProposalView({ id }: PublicViewProps) {
     }
     setSubmitting(true);
     try {
-      await proposalService.updateProposal(id, { status: ProposalStatus.WON });
-      setProposal(prev => prev ? { ...prev, status: ProposalStatus.WON } : null);
+      const approved = await proposalService.approvePublicProposal(id, publicToken, signature.trim());
+      setProposal(approved);
       toast.success('Proposta aprovada com sucesso!');
       setShowApproval(false);
       setSignature('');
@@ -91,7 +92,10 @@ export function PublicProposalView({ id }: PublicViewProps) {
         <div className="flex items-center gap-4">
           <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Ref: {proposal.proposalNumber}</span>
           <button
-            onClick={() => window.open(`/proposal/${id}?print=1`, '_blank')}
+            onClick={() => {
+              const params = new URLSearchParams({ token: publicToken, print: '1' });
+              window.open(`/proposal/${id}?${params.toString()}`, '_blank');
+            }}
             className="flex items-center gap-2 text-xs font-bold bg-neutral-100 px-4 py-2 rounded-lg hover:bg-neutral-200 transition-colors"
           >
             <Download size={14} /> PDF
